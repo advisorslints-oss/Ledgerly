@@ -6,6 +6,7 @@ import { saveContact } from '../src/accounting/contacts'
 import { saveDocument } from '../src/accounting/documents'
 import { postEntry } from '../src/accounting/engine'
 import { savePayment } from '../src/accounting/payments'
+import { runRecurring, saveRecurring } from '../src/accounting/recurring'
 import { computeTrialBalance, loadAccounts, loadLines } from '../src/accounting/reports'
 import { LedgerDB } from '../src/db/database'
 import type { DocLine } from '../src/db/types'
@@ -131,6 +132,40 @@ describe('syncing between devices', () => {
     expect(onPhone).toEqual(await books(laptop.db, company.id))
     expect(onPhone.balances['1100']).toBe(150_000)
     expect((await phone.db.documents.get(inv.id))!.total).toBe(150_000)
+  })
+
+  it('creates each recurring invoice once, even if two devices both run the schedule offline', async () => {
+    const auth = await account()
+    const laptop = await device(auth)
+    const { company, code } = await setupBusiness(laptop.db)
+    const customer = await saveContact(laptop.db, company.id, { type: 'customer', name: 'Retainer client' })
+    await saveRecurring(laptop.db, company.id, {
+      docType: 'invoice',
+      template: { contactId: customer.id, lines: [line(code('4000'), 30_000)], taxInclusive: false, dueInDays: 7 },
+      every: 1,
+      unit: 'month',
+      startDate: '2026-03-01',
+      autoApprove: true,
+    })
+    // A draft both devices will approve.
+    const draft = await saveDocument(laptop.db, company.id, { type: 'invoice', contactId: customer.id, date: '2026-03-05', lines: [line(code('4000'), 9_000)], taxInclusive: false })
+    await uploadCompany(laptop.db, laptop.api, company.id)
+    const phone = await device(auth)
+    await phone.sync()
+
+    await runRecurring(laptop.db, company.id, '2026-05-15')
+    await runRecurring(phone.db, company.id, '2026-05-15')
+    const approve = (db: LedgerDB) => saveDocument(db, company.id, { type: 'invoice', contactId: customer.id, date: '2026-03-05', lines: draft.lines, taxInclusive: false }, { id: draft.id, post: true })
+    await approve(laptop.db)
+    await approve(phone.db)
+    await laptop.sync()
+    await phone.sync()
+    await laptop.sync()
+
+    const onLaptop = await books(laptop.db, company.id)
+    expect(onLaptop).toEqual(await books(phone.db, company.id))
+    expect(onLaptop.documents).toHaveLength(4)
+    expect(onLaptop.balances['1100']).toBe(3 * 30_000 + 9_000)
   })
 
   it('stops view-only members from changing a shared business', async () => {

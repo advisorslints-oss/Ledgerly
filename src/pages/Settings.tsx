@@ -13,7 +13,8 @@ import { Field, Input, Select, Switch, Textarea } from '../components/ui/form'
 import { Badge, Card, CardHeader, Segmented, Spinner } from '../components/ui/misc'
 import { useToast } from '../components/ui/toast'
 import { db } from '../db'
-import type { TaxComponent, TaxRate } from '../db/types'
+import { DEFAULT_REMINDERS, reminderSettings, STAGE_CHOICES, stageLabel } from '../accounting/reminders'
+import type { ReminderStage, ReminderTone, TaxComponent, TaxRate } from '../db/types'
 import { cn } from '../lib/cn'
 import { MONTHS, addDays, fiscalYearStart, today } from '../lib/dates'
 import { CURRENCIES } from '../lib/money'
@@ -65,7 +66,12 @@ export function Settings() {
         {tab === 'business' && <BusinessTab />}
         {tab === 'account' && <AccountTab />}
         {tab === 'team' && <TeamTab />}
-        {tab === 'documents' && <DocumentsTab />}
+        {tab === 'documents' && (
+          <>
+            <DocumentsTab />
+            <RemindersSection />
+          </>
+        )}
         {tab === 'preferences' && <PreferencesTab />}
         {tab === 'taxes' && <TaxesTab />}
         {tab === 'lock' && <LockTab />}
@@ -223,7 +229,7 @@ function DocumentsTab() {
 
   const save = async () => {
     try {
-      await updateCompany(db, company.id, { documentSettings: { ...form, logo: form.logo || undefined } })
+      await updateCompany(db, company.id, { documentSettings: { ...company.documentSettings, ...form, logo: form.logo || undefined } })
       toast('Invoice settings saved')
     } catch (err) {
       toast(errorMessage(err), 'error')
@@ -323,6 +329,76 @@ function DocumentsTab() {
         <Field label="Default terms & conditions">{(id) => <Textarea id={id} value={form.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} rows={3} maxLength={2000} />}</Field>
       </div>
     </Section>
+  )
+}
+
+const TONE_LABELS: Record<ReminderTone, string> = { gentle: 'Friendly reminder', firm: 'Firm reminder', final: 'Final reminder' }
+
+function RemindersSection() {
+  const company = useCompany()
+  const toast = useToast()
+  const [form, setForm] = useState(() => reminderSettings(company))
+  const on = new Set(form.stages.map((s) => s.days))
+  useEffect(() => {
+    if (window.location.hash === '#reminders') document.getElementById('reminders')?.scrollIntoView({ block: 'start' })
+  }, [])
+
+  const toggle = (stage: ReminderStage) =>
+    setForm((s) => ({ ...s, stages: on.has(stage.days) ? s.stages.filter((x) => x.days !== stage.days) : [...s.stages, stage].sort((a, b) => a.days - b.days) }))
+
+  const save = async () => {
+    try {
+      await updateCompany(db, company.id, { documentSettings: { ...company.documentSettings, reminders: form } })
+      toast('Reminder settings saved')
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    }
+  }
+
+  return (
+    <div id="reminders">
+      <Section
+        title="Payment reminders"
+        description="When to nudge customers about unpaid invoices. They show up under Sales → Reminders, ready to send from your WhatsApp or email."
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setForm({ ...DEFAULT_REMINDERS, enabled: form.enabled })}>
+              Reset to defaults
+            </Button>
+            <Button variant="primary" onClick={save}>
+              Save changes
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-5">
+          <Switch checked={form.enabled} onChange={(enabled) => setForm((s) => ({ ...s, enabled }))} label="Suggest payment reminders" />
+          {form.enabled && (
+            <>
+              <fieldset>
+                <legend className="mb-2 text-[13px] font-medium">Remind customers</legend>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {STAGE_CHOICES.map((s) => (
+                    <label key={s.days} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm hover:bg-surface-2">
+                      <input type="checkbox" checked={on.has(s.days)} onChange={() => toggle(s)} className="size-4 accent-[var(--color-primary)]" />
+                      <span className="flex-1">{stageLabel(s.days)}</span>
+                      <span className="text-xs text-fg-subtle">{TONE_LABELS[s.tone].split(' ')[0]}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {(['gentle', 'firm', 'final'] as const).map((tone) => (
+                <Field key={tone} label={TONE_LABELS[tone]} hint={tone === 'gentle' ? 'Fills in: {customer} {number} {amount} {due_text} {due_date} {days_overdue} {payment_details} {business}' : undefined}>
+                  {(id, d) => (
+                    <Textarea id={id} aria-describedby={d} value={form.templates[tone]} onChange={(e) => setForm((s) => ({ ...s, templates: { ...s.templates, [tone]: e.target.value } }))} rows={6} maxLength={2000} />
+                  )}
+                </Field>
+              ))}
+            </>
+          )}
+        </div>
+      </Section>
+    </div>
   )
 }
 

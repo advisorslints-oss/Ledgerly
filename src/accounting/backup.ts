@@ -13,6 +13,8 @@ import type {
   JournalLine,
   Payment,
   Reconciliation,
+  Recurring,
+  Reminder,
   StockMove,
   TaxRate,
 } from '../db/types'
@@ -38,6 +40,8 @@ export interface BackupFile {
   bankLines?: BankLine[]
   bankRules?: BankRule[]
   reconciliations?: Reconciliation[]
+  recurring?: Recurring[]
+  reminders?: Reminder[]
   attachments?: StoredAttachment[]
 }
 
@@ -93,6 +97,8 @@ export async function exportCompany(db: LedgerDB, companyId: string): Promise<Ba
     bankLines: data.rows.bankLines,
     bankRules: data.rows.bankRules,
     reconciliations: data.rows.reconciliations,
+    recurring: data.rows.recurring,
+    reminders: data.rows.reminders,
     attachments,
   }
 }
@@ -143,6 +149,8 @@ export async function restoreBackup(db: LedgerDB, backup: BackupFile): Promise<v
     bankLines: backup.bankLines ?? [],
     bankRules: backup.bankRules ?? [],
     reconciliations: backup.reconciliations ?? [],
+    recurring: backup.recurring ?? [],
+    reminders: backup.reminders ?? [],
     attachments,
   }
   await db.transaction('rw', db.tables, async () => {

@@ -1,7 +1,7 @@
 import type { LedgerDB } from '../db/database'
 import type { Account, Company, EntrySource, JournalEntry, JournalLine } from '../db/types'
 import { isISODate, today } from '../lib/dates'
-import { newId } from '../lib/id'
+import { newId, seededId } from '../lib/id'
 import { AccountingError } from './errors'
 
 export interface LineInput {
@@ -118,6 +118,8 @@ interface InsertInput {
   source: EntrySource
   reversalOfId?: string
   docId?: string
+  /** Gives the entry and its lines ids that are the same on every device (see seededId). */
+  idSeed?: string
   lines: CleanLine[]
 }
 
@@ -134,7 +136,7 @@ export async function takeNumber(db: LedgerDB, companyId: string, series: string
 async function insertEntry(db: LedgerDB, companyId: string, input: InsertInput): Promise<JournalEntry> {
   const at = Date.now()
   const entry: JournalEntry = {
-    id: newId(),
+    id: input.idSeed ? seededId(`${input.idSeed}/entry`) : newId(),
     companyId,
     number: await takeNumber(db, companyId, 'journal', 'JE'),
     date: input.date,
@@ -150,7 +152,7 @@ async function insertEntry(db: LedgerDB, companyId: string, input: InsertInput):
     updatedAt: at,
   }
   const lines: JournalLine[] = input.lines.map((l, order) => ({
-    id: newId(),
+    id: input.idSeed ? seededId(`${input.idSeed}/line/${order}`) : newId(),
     companyId,
     entryId: entry.id,
     accountId: l.accountId,
@@ -176,7 +178,7 @@ async function insertEntry(db: LedgerDB, companyId: string, input: InsertInput):
 export async function postGeneratedEntry(
   db: LedgerDB,
   companyId: string,
-  input: { date: string; memo: string; reference?: string; source: EntrySource; docId: string; lines: LineInput[] },
+  input: { date: string; memo: string; reference?: string; source: EntrySource; docId: string; idSeed?: string; lines: LineInput[] },
 ): Promise<JournalEntry> {
   const company = await requireCompany(db, companyId)
   assertOpenPeriod(company, input.date)

@@ -268,12 +268,12 @@ export async function uploadCompany(db: LedgerDB, api: ApiClient, companyId: str
   }
   // The lock date goes last: entries from before it are being uploaded, not newly created.
   const { lockDate, ...unlocked } = company
-  add([putChange('companies', unlocked), ...['accounts', 'taxRates', 'contacts', 'items', 'bankRules'].flatMap((t) => all[t].map((r) => putChange(t as SyncTable, r)))])
+  add([putChange('companies', unlocked), ...['accounts', 'taxRates', 'contacts', 'items', 'bankRules', 'recurring'].flatMap((t) => all[t].map((r) => putChange(t as SyncTable, r)))])
   const linesByEntry = new Map<string, Record<string, unknown>[]>()
   for (const l of all.journalLines) linesByEntry.set(l.entryId as string, [...(linesByEntry.get(l.entryId as string) ?? []), l])
   const entries = [...all.journalEntries].sort((a, b) => (a.createdAt as number) - (b.createdAt as number))
   for (const group of chunk(entries, 150)) add(group.flatMap((e) => [putChange('journalEntries', e), ...(linesByEntry.get(e.id as string) ?? []).map((l) => putChange('journalLines', l))]))
-  for (const t of ['documents', 'payments', 'stockMoves', 'bankLines', 'reconciliations'] as const) for (const group of chunk(all[t], 500)) add(group.map((r) => putChange(t, r)))
+  for (const t of ['documents', 'payments', 'stockMoves', 'bankLines', 'reconciliations', 'reminders'] as const) for (const group of chunk(all[t], 500)) add(group.map((r) => putChange(t, r)))
   // The business must exist on the server before its files can be stored there.
   await send()
   for (const group of chunk(all.attachments as unknown as Attachment[], 50)) {

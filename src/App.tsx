@@ -18,6 +18,8 @@ import { DocumentForm } from './pages/docs/DocumentForm'
 import { DocumentList } from './pages/docs/DocumentList'
 import { DocumentView } from './pages/docs/DocumentView'
 import { PaymentForm, PaymentList, PaymentView } from './pages/docs/Payments'
+import { RecurringForm, RecurringList, RecurringView } from './pages/docs/Recurring'
+import { Reminders } from './pages/docs/Reminders'
 import { ItemsList, ItemView, StockPage } from './pages/Items'
 import { Journal } from './pages/Journal'
 import { JournalEntryForm } from './pages/JournalEntryForm'
@@ -71,8 +73,13 @@ export function App() {
                 ))}
                 <Route path="payments" element={<PaymentList direction="in" />} />
                 <Route path="customers" element={<ContactList key="c" kind="customer" />} />
+                <Route path="recurring" element={<RecurringList key="s" side="sales" />} />
+                <Route path="reminders" element={<Reminders />} />
               </Route>
               {SALES.flatMap(docPages)}
+              <Route path="sales/recurring/new" element={<RecurringForm key="s-new" side="sales" />} />
+              <Route path="sales/recurring/:id/edit" element={<RecurringForm side="sales" />} />
+              <Route path="sales/recurring/:id" element={<RecurringView side="sales" />} />
               <Route path="sales/payments/new" element={<PaymentForm key="in-new" direction="in" />} />
               <Route path="sales/payments/:id/edit" element={<PaymentForm direction="in" />} />
               <Route path="sales/payments/:id" element={<PaymentView direction="in" />} />
@@ -85,8 +92,12 @@ export function App() {
                 ))}
                 <Route path="payments" element={<PaymentList direction="out" />} />
                 <Route path="suppliers" element={<ContactList key="s" kind="supplier" />} />
+                <Route path="recurring" element={<RecurringList key="p" side="purchases" />} />
               </Route>
               {PURCHASES.flatMap(docPages)}
+              <Route path="purchases/recurring/new" element={<RecurringForm key="p-new" side="purchases" />} />
+              <Route path="purchases/recurring/:id/edit" element={<RecurringForm side="purchases" />} />
+              <Route path="purchases/recurring/:id" element={<RecurringView side="purchases" />} />
               <Route path="purchases/payments/new" element={<PaymentForm key="out-new" direction="out" />} />
               <Route path="purchases/payments/:id/edit" element={<PaymentForm direction="out" />} />
               <Route path="purchases/payments/:id" element={<PaymentView direction="out" />} />

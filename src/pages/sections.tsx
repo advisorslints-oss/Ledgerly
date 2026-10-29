@@ -5,6 +5,7 @@ import { SectionHeader, SectionTabs } from '../components/SectionTabs'
 import { useCompany } from '../state/company'
 import { useLedgerDocs } from '../state/data'
 import { usePrefs } from '../state/prefs'
+import { useDueReminders } from './docs/Reminders'
 
 function useOverdue(type: 'invoice' | 'bill') {
   const company = useCompany()
@@ -13,7 +14,9 @@ function useOverdue(type: 'invoice' | 'bill') {
 }
 
 export function SalesLayout() {
+  const company = useCompany()
   const overdue = useOverdue('invoice')
+  const { due } = useDueReminders(company)
   return (
     <div>
       <SectionHeader title="Sales" />
@@ -22,6 +25,8 @@ export function SalesLayout() {
           { to: '/sales/invoices', label: 'Invoices', count: overdue },
           { to: '/sales/quotes', label: 'Quotes' },
           { to: '/sales/payments', label: 'Payments received' },
+          { to: '/sales/reminders', label: 'Reminders', count: due?.length },
+          { to: '/sales/recurring', label: 'Recurring' },
           { to: '/sales/credit-notes', label: 'Credit notes' },
           { to: '/sales/customers', label: 'Customers' },
         ]}
@@ -42,6 +47,7 @@ export function PurchasesLayout() {
           { to: '/purchases/expenses', label: 'Expenses' },
           { to: '/purchases/orders', label: 'Purchase orders' },
           { to: '/purchases/payments', label: 'Payments made' },
+          { to: '/purchases/recurring', label: 'Recurring' },
           { to: '/purchases/credits', label: 'Supplier credits' },
           { to: '/purchases/suppliers', label: 'Suppliers' },
         ]}

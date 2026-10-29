@@ -36,7 +36,9 @@ import { useOnline } from '../../lib/platform'
 import { relativeTime } from '../../lib/time'
 import { useCompany } from '../../state/company'
 import { setPrefs, usePrefs } from '../../state/prefs'
-import { useSyncState } from '../../sync/controller'
+import { DOC_TYPES } from '../../accounting/documents'
+import { onRecurringCreated, useSyncState } from '../../sync/controller'
+import { useToast } from '../ui/toast'
 import { useQuickEntry } from '../QuickEntry'
 import { Dialog } from '../ui/dialog'
 import { Menu, MenuItem } from '../ui/menu'
@@ -325,6 +327,20 @@ export function AppShell({ children }: { children: ReactNode }) {
     setDrawerOpen(false)
     window.scrollTo({ top: 0 })
   }, [location.pathname])
+
+  const toast = useToast()
+  useEffect(
+    () =>
+      onRecurringCreated((docs) => {
+        const here = docs.filter((d) => d.companyId === company.id)
+        if (!here.length) return
+        const drafts = here.filter((d) => d.status === 'draft').length
+        const kinds = new Set(here.map((d) => d.type))
+        const what = kinds.size === 1 ? DOC_TYPES[here[0].type][here.length === 1 ? 'label' : 'plural'].toLowerCase() : 'documents'
+        toast(`Created ${here.length === 1 ? `${what} ${here[0].number}` : `${here.length} recurring ${what}`}${drafts ? ` (${drafts === here.length ? '' : `${drafts} `}as draft${drafts > 1 ? 's' : ''} to check)` : ''}`, 'info')
+      }),
+    [company.id, toast],
+  )
 
   const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
 

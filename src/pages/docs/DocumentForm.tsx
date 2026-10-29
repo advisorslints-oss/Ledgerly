@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { computeTotals, DOC_TYPES, lineGross, saveDocument, type DocInput } from '../../accounting/documents'
 import { errorMessage } from '../../accounting/errors'
+import { occurrenceDate, saveRecurring } from '../../accounting/recurring'
 import { AccountPicker } from '../../components/AccountPicker'
 import { AmountInput } from '../../components/AmountInput'
 import { Attachments } from '../../components/Attachments'
@@ -15,13 +16,15 @@ import { Field, Input, inputClass, Select, Switch, Textarea } from '../../compon
 import { Card, Help, PageHeader, Spinner } from '../../components/ui/misc'
 import { useToast } from '../../components/ui/toast'
 import { db } from '../../db'
-import type { Doc, DocStatus, DocType, Item } from '../../db/types'
+import type { Doc, DocLine, DocStatus, DocType, Item, Recurring } from '../../db/types'
 import { cn } from '../../lib/cn'
-import { addDays, today } from '../../lib/dates'
+import { addDays, fromISODate, today } from '../../lib/dates'
 import { newId } from '../../lib/id'
 import { useCompany, useFormat } from '../../state/company'
 import { useAccounts, useContacts, useItems, useTaxRates } from '../../state/data'
 import { usePrefs } from '../../state/prefs'
+import { runSchedulesNow } from '../../sync/controller'
+import { newPlan, planFrom, planInput, ScheduleFields, type Plan } from './ScheduleFields'
 
 interface Row {
   id: string
@@ -59,7 +62,16 @@ function defaultTerms(type: DocType, settings: { paymentTermsDays?: number; quot
   return settings?.paymentTermsDays ?? 14
 }
 
-export function DocumentForm({ type }: { type: DocType }) {
+const daysBetween = (from: string, to: string) => Math.round((fromISODate(to).getTime() - fromISODate(from).getTime()) / 86_400_000)
+
+/** Where a side's recurring schedules live. */
+export const recurringPath = (side: 'sales' | 'purchases') => (side === 'sales' ? '/sales/recurring' : '/purchases/recurring')
+
+/**
+ * Creates or edits a document. With `schedule`, it edits a recurring schedule instead: the same lines and
+ * terms, plus when to repeat, and no number or date (each document gets its own).
+ */
+export function DocumentForm({ type, schedule = false }: { type: DocType; schedule?: boolean }) {
   const info = DOC_TYPES[type]
   const { id } = useParams()
   const [params] = useSearchParams()
@@ -72,7 +84,11 @@ export function DocumentForm({ type }: { type: DocType }) {
   const taxRates = useTaxRates(company.id)
   const items = useItems(company.id)
   const contacts = useContacts(company.id)
-  const existing = useLiveQuery(async () => (id ? ((await db.documents.get(id)) ?? null) : null), [id])
+  const existing = useLiveQuery(async () => (id && !schedule ? ((await db.documents.get(id)) ?? null) : null), [id, schedule])
+  const existingSchedule = useLiveQuery(async () => (id && schedule ? ((await db.recurring.get(id)) ?? null) : null), [id, schedule])
+  const fromId = schedule ? params.get('from') : null
+  const source = useLiveQuery(async () => (fromId ? ((await db.documents.get(fromId)) ?? null) : null), [fromId])
+  const [plan, setPlan] = useState<Plan | null>(schedule ? null : newPlan())
   const [draftId] = useState(newId)
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -84,12 +100,31 @@ export function DocumentForm({ type }: { type: DocType }) {
   const blankRow = (): Row => ({ id: newId(), itemId: '', description: '', quantity: 1, qtyText: '1', rate: 0, discountPct: 0, accountId: defaultAccount, taxRateId: '', more: false })
 
   useEffect(() => {
-    if (form || !accounts || !contacts || existing === undefined) return
+    if (form || !accounts || !contacts || existing === undefined || existingSchedule === undefined || source === undefined) return
     if (existing) {
       setForm(fromDoc(existing))
       setShowNotes(!!existing.notes || !!existing.terms)
       return
     }
+    if (existingSchedule) {
+      const t = existingSchedule.template
+      setForm(fromDoc({ ...t, number: '', date: today(), dueDate: addDays(today(), t.dueInDays) } as unknown as Doc, t.dueInDays))
+      setShowNotes(!!t.notes || !!t.terms)
+      setPlan(planFrom(existingSchedule))
+      return
+    }
+    if (source) {
+      const terms = source.dueDate ? daysBetween(source.date, source.dueDate) : defaultTerms(type, company.documentSettings)
+      const copy = fromDoc(source, terms)
+      setForm({ ...copy, number: '', rows: copy.rows.map((r) => ({ ...r, id: newId() })) })
+      setShowNotes(!!source.notes || !!source.terms)
+      // Carry on the pattern: the first one is the same day next month, or later if that has passed.
+      let i = 1
+      while (occurrenceDate({ startDate: source.date, every: 1, unit: 'month' }, i) <= today()) i++
+      setPlan(newPlan(occurrenceDate({ startDate: source.date, every: 1, unit: 'month' }, i)))
+      return
+    }
+    if (schedule) setPlan(newPlan())
     const contactId = params.get('contact') ?? ''
     const contact = contacts.find((c) => c.id === contactId)
     const termsDays = contact?.paymentTermsDays ?? defaultTerms(type, company.documentSettings)
@@ -100,7 +135,7 @@ export function DocumentForm({ type }: { type: DocType }) {
       number: '',
       date,
       dueDate: addDays(date, termsDays),
-      termsDays: TERMS_OPTIONS.some((t) => t.value === termsDays) ? termsDays : 'custom',
+      termsDays: schedule || TERMS_OPTIONS.some((t) => t.value === termsDays) ? termsDays : 'custom',
       reference: '',
       taxInclusive: false,
       notes: sales ? (settings?.invoiceNotes ?? '') : '',
@@ -109,7 +144,7 @@ export function DocumentForm({ type }: { type: DocType }) {
       rows: [blankRow()],
     })
     // Initialise once, when the data first arrives; later live updates must not wipe the form.
-  }, [accounts, contacts, existing])
+  }, [accounts, contacts, existing, existingSchedule, source])
 
   const taxMap = useMemo(() => new Map((taxRates ?? []).map((t) => [t.id, t])), [taxRates])
   const totals = useMemo(
@@ -117,7 +152,17 @@ export function DocumentForm({ type }: { type: DocType }) {
     [form, taxMap, info.side],
   )
 
-  if (!form || !accounts || !items || !taxRates || !totals) return <Spinner />
+  if (schedule && id && existingSchedule === null) {
+    return (
+      <Card className="p-6 text-sm text-fg-muted">
+        This schedule doesn't exist any more.{' '}
+        <Link to={recurringPath(info.side)} className="font-medium text-primary-ink">
+          See all recurring {info.plural.toLowerCase()}
+        </Link>
+      </Card>
+    )
+  }
+  if (!form || !plan || !accounts || !items || !taxRates || !totals) return <Spinner />
   if (existing && (existing.status === 'void' || existing.status === 'converted')) {
     return (
       <Card className="p-6 text-sm text-fg-muted">
@@ -153,6 +198,49 @@ export function DocumentForm({ type }: { type: DocType }) {
   const activeRates = taxRates.filter((t) => !t.archived).sort((a, b) => a.rate - b.rate || a.name.localeCompare(b.name))
   const nextNumber = `${info.prefix}-${String(company.nextNumbers[type] ?? 1).padStart(4, '0')}`
 
+  const lines: DocLine[] = form.rows.map((r) => ({
+    id: r.id,
+    itemId: r.itemId || undefined,
+    description: r.description,
+    quantity: r.quantity,
+    rate: r.rate,
+    discountPct: r.discountPct || undefined,
+    accountId: r.accountId,
+    taxRateId: r.taxRateId || undefined,
+  }))
+
+  const saveSchedule = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const saved = await saveRecurring(
+        db,
+        company.id,
+        {
+          ...planInput(plan),
+          docType: type as Recurring['docType'],
+          template: {
+            contactId: form.contactId || undefined,
+            reference: form.reference || undefined,
+            lines,
+            taxInclusive: form.taxInclusive,
+            notes: form.notes || undefined,
+            terms: form.terms || undefined,
+            paidFromAccountId: type === 'expense' ? form.paidFromAccountId : undefined,
+            dueInDays: form.termsDays === 'custom' ? daysBetween(form.date, form.dueDate) : form.termsDays,
+          },
+        },
+        existingSchedule?.id,
+      )
+      toast(`Schedule "${saved.name}" saved`)
+      void runSchedulesNow()
+      navigate(`${recurringPath(info.side)}/${saved.id}`, { replace: true })
+    } catch (err) {
+      setError(errorMessage(err))
+      setBusy(false)
+    }
+  }
+
   const save = async (opts: { post?: boolean; status?: DocStatus }) => {
     setBusy(true)
     setError(null)
@@ -163,16 +251,7 @@ export function DocumentForm({ type }: { type: DocType }) {
       date: form.date,
       dueDate: info.dueLabel ? form.dueDate : undefined,
       reference: form.reference,
-      lines: form.rows.map((r) => ({
-        id: r.id,
-        itemId: r.itemId || undefined,
-        description: r.description,
-        quantity: r.quantity,
-        rate: r.rate,
-        discountPct: r.discountPct || undefined,
-        accountId: r.accountId,
-        taxRateId: r.taxRateId || undefined,
-      })),
+      lines,
       taxInclusive: form.taxInclusive,
       notes: form.notes,
       terms: form.terms,
@@ -190,12 +269,15 @@ export function DocumentForm({ type }: { type: DocType }) {
 
   const submitPrimary = (e?: FormEvent) => {
     e?.preventDefault()
-    if (info.posts) void save({ post: true })
+    if (schedule) void saveSchedule()
+    else if (info.posts) void save({ post: true })
     else void save({ status: existing && existing.status !== 'draft' ? existing.status : type === 'quote' ? 'sent' : 'issued' })
   }
 
   const isPosted = existing?.status === 'posted'
-  const primaryLabel = info.posts
+  const primaryLabel = schedule
+    ? 'Save schedule'
+    : info.posts
     ? isPosted
       ? 'Save changes'
       : type === 'expense'
@@ -206,7 +288,7 @@ export function DocumentForm({ type }: { type: DocType }) {
       : type === 'quote'
         ? 'Save & mark as sent'
         : 'Save & issue'
-  const showDraft = type !== 'expense' && (!existing || existing.status === 'draft')
+  const showDraft = !schedule && type !== 'expense' && (!existing || existing.status === 'draft')
 
   const gridCols = sales
     ? 'md:grid-cols-[minmax(0,3fr)_5rem_8rem_9rem_8rem_2.25rem]'
@@ -214,17 +296,30 @@ export function DocumentForm({ type }: { type: DocType }) {
 
   return (
     <div>
-      <PageHeader
-        back={
-          <Link to={existing ? `${info.path}/${existing.id}` : info.path} className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg">
-            <ArrowLeft className="size-4" /> {existing ? `${info.label} ${existing.number}` : info.plural}
-          </Link>
-        }
-        title={existing ? `Edit ${info.label.toLowerCase()} ${existing.number}` : `New ${info.label.toLowerCase()}`}
-        description={isPosted ? 'Saving replaces the original entry in your books with the corrected one. The history is kept.' : undefined}
-      />
+      {schedule ? (
+        <PageHeader
+          back={
+            <Link to={existingSchedule ? `${recurringPath(info.side)}/${existingSchedule.id}` : recurringPath(info.side)} className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg">
+              <ArrowLeft className="size-4" /> {existingSchedule ? existingSchedule.name : 'Recurring'}
+            </Link>
+          }
+          title={existingSchedule ? 'Edit schedule' : `New recurring ${info.label.toLowerCase()}`}
+          description={existingSchedule ? "Changes apply to the ones created from now on. Ones already created don't change." : `Set it up once, and a new ${info.label.toLowerCase()} is created on each date.`}
+        />
+      ) : (
+        <PageHeader
+          back={
+            <Link to={existing ? `${info.path}/${existing.id}` : info.path} className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg">
+              <ArrowLeft className="size-4" /> {existing ? `${info.label} ${existing.number}` : info.plural}
+            </Link>
+          }
+          title={existing ? `Edit ${info.label.toLowerCase()} ${existing.number}` : `New ${info.label.toLowerCase()}`}
+          description={isPosted ? 'Saving replaces the original entry in your books with the corrected one. The history is kept.' : undefined}
+        />
+      )}
 
       <form onSubmit={submitPrimary}>
+        {schedule && <ScheduleFields plan={plan} onChange={setPlan} label={info.label} done={{ count: existingSchedule?.createdCount ?? 0, lastDate: existingSchedule?.lastDate, saved: existingSchedule ?? undefined }} />}
         <Card className="p-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label={type === 'expense' ? 'Supplier (optional)' : info.contactLabel} className="sm:col-span-2">
@@ -236,26 +331,30 @@ export function DocumentForm({ type }: { type: DocType }) {
                   onChange={(cid) => {
                     set('contactId', cid)
                     const c = contacts?.find((x) => x.id === cid)
-                    if (c?.paymentTermsDays !== undefined && info.dueLabel && form.termsDays !== 'custom') applyTerms(TERMS_OPTIONS.some((t) => t.value === c.paymentTermsDays) ? c.paymentTermsDays : 'custom')
+                    if (c?.paymentTermsDays !== undefined && info.dueLabel && form.termsDays !== 'custom') applyTerms(schedule || TERMS_OPTIONS.some((t) => t.value === c.paymentTermsDays) ? c.paymentTermsDays : 'custom')
                   }}
                 />
               )}
             </Field>
-            <Field label={`${info.label} number`}>{(fid) => <Input id={fid} value={form.number} onChange={(e) => set('number', e.target.value)} placeholder={existing?.number ?? nextNumber} maxLength={40} />}</Field>
-            <Field label="Date">
-              {(fid) => (
-                <Input
-                  id={fid}
-                  type="date"
-                  value={form.date}
-                  required
-                  onChange={(e) => {
-                    const date = e.target.value
-                    setForm((s) => (s ? { ...s, date, dueDate: s.termsDays === 'custom' ? s.dueDate : addDays(date || s.date, s.termsDays) } : s))
-                  }}
-                />
-              )}
-            </Field>
+            {!schedule && (
+              <>
+                <Field label={`${info.label} number`}>{(fid) => <Input id={fid} value={form.number} onChange={(e) => set('number', e.target.value)} placeholder={existing?.number ?? nextNumber} maxLength={40} />}</Field>
+                <Field label="Date">
+                  {(fid) => (
+                    <Input
+                      id={fid}
+                      type="date"
+                      value={form.date}
+                      required
+                      onChange={(e) => {
+                        const date = e.target.value
+                        setForm((s) => (s ? { ...s, date, dueDate: s.termsDays === 'custom' ? s.dueDate : addDays(date || s.date, s.termsDays) } : s))
+                      }}
+                    />
+                  )}
+                </Field>
+              </>
+            )}
             {info.dueLabel && (
               <>
                 <Field label={type === 'quote' ? 'Valid for' : type === 'purchase_order' ? 'Delivery in' : 'Payment terms'}>
@@ -269,13 +368,16 @@ export function DocumentForm({ type }: { type: DocType }) {
                           {t.label}
                         </option>
                       ))}
-                      <option value="custom">Pick a date</option>
+                      {!schedule && <option value="custom">Pick a date</option>}
+                      {schedule && typeof form.termsDays === 'number' && !TERMS_OPTIONS.some((t) => t.value === form.termsDays) && <option value={form.termsDays}>{form.termsDays} days</option>}
                     </Select>
                   )}
                 </Field>
-                <Field label={info.dueLabel}>
-                  {(fid) => <Input id={fid} type="date" value={form.dueDate} min={form.date} onChange={(e) => (set('dueDate', e.target.value), set('termsDays', 'custom'))} />}
-                </Field>
+                {!schedule && (
+                  <Field label={info.dueLabel}>
+                    {(fid) => <Input id={fid} type="date" value={form.dueDate} min={form.date} onChange={(e) => (set('dueDate', e.target.value), set('termsDays', 'custom'))} />}
+                  </Field>
+                )}
               </>
             )}
             {type === 'expense' && (
@@ -430,10 +532,12 @@ export function DocumentForm({ type }: { type: DocType }) {
               {sales && <Field label="Terms & conditions">{(fid) => <Textarea id={fid} value={form.terms} onChange={(e) => set('terms', e.target.value)} rows={3} maxLength={2000} />}</Field>}
             </div>
           )}
-          <div className="mt-5 border-t border-line pt-4">
-            <p className="mb-2 text-[13px] font-medium">Attachments</p>
-            <Attachments parentId={existing?.id ?? draftId} />
-          </div>
+          {!schedule && (
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="mb-2 text-[13px] font-medium">Attachments</p>
+              <Attachments parentId={existing?.id ?? draftId} />
+            </div>
+          )}
         </Card>
 
         {error && (
@@ -457,13 +561,13 @@ export function DocumentForm({ type }: { type: DocType }) {
     </div>
   )
 
-  function fromDoc(doc: Doc): FormState {
+  function fromDoc(doc: Doc, termsDays?: number): FormState {
     return {
       contactId: doc.contactId ?? '',
       number: doc.number,
       date: doc.date,
       dueDate: doc.dueDate ?? doc.date,
-      termsDays: 'custom',
+      termsDays: termsDays ?? 'custom',
       reference: doc.reference ?? '',
       taxInclusive: doc.taxInclusive,
       notes: doc.notes ?? '',

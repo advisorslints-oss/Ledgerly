@@ -1,7 +1,7 @@
 import type { LedgerDB } from '../db/database'
 import type { Account, Allocation, Company, Doc, DocLine, DocStatus, DocType, Item, Payment, StockMove, TaxRate } from '../db/types'
 import { addDays, isISODate, today } from '../lib/dates'
-import { newId } from '../lib/id'
+import { newId, seededId } from '../lib/id'
 import { postGeneratedEntry, requireCompany, reverseEntry, takeNumber, type LineInput } from './engine'
 import { AccountingError } from './errors'
 import { currentUnitCost, roundQty } from './items'
@@ -161,7 +161,7 @@ function validateHeader(input: DocInput, info: DocTypeInfo, ctx: Ctx): void {
 }
 
 /** Builds the journal lines and stock movements a posted document creates. */
-async function buildPosting(db: LedgerDB, doc: Doc, totals: DocTotals, ctx: Ctx, info: DocTypeInfo): Promise<{ lines: LineInput[]; moves: StockMove[] }> {
+async function buildPosting(db: LedgerDB, doc: Doc, totals: DocTotals, ctx: Ctx, info: DocTypeInfo, idSeed?: string): Promise<{ lines: LineInput[]; moves: StockMove[] }> {
   const sign = info.credit ? -1 : 1
   const lines: LineInput[] = []
   const moves: StockMove[] = []
@@ -171,7 +171,7 @@ async function buildPosting(db: LedgerDB, doc: Doc, totals: DocTotals, ctx: Ctx,
   }
   const move = (itemId: string, quantity: number, value: number) =>
     moves.push({
-      id: newId(),
+      id: idSeed ? seededId(`${idSeed}/move/${moves.length}`) : newId(),
       companyId: doc.companyId,
       itemId,
       date: doc.date,
@@ -263,6 +263,10 @@ export interface SaveOptions {
   status?: DocStatus
   /** Id to give a new document, so files attached before the first save stay linked. */
   assignId?: string
+  /** Seed for ids that are identical on every device (recurring documents), see seededId. */
+  idSeed?: string
+  /** The recurring schedule creating this document. */
+  recurringId?: string
 }
 
 export async function saveDocument(db: LedgerDB, companyId: string, input: DocInput, opts: SaveOptions = {}): Promise<Doc> {
@@ -304,7 +308,7 @@ export async function saveDocument(db: LedgerDB, companyId: string, input: DocIn
 
     const at = Date.now()
     const doc: Doc = {
-      id: existing?.id ?? opts.assignId ?? newId(),
+      id: existing?.id ?? (opts.idSeed ? seededId(opts.idSeed) : (opts.assignId ?? newId())),
       companyId,
       type: input.type,
       number,
@@ -323,6 +327,7 @@ export async function saveDocument(db: LedgerDB, companyId: string, input: DocIn
       paidFromAccountId: input.type === 'expense' ? input.paidFromAccountId : undefined,
       convertedFromId: existing?.convertedFromId,
       convertedToId: existing?.convertedToId,
+      recurringId: existing?.recurringId ?? opts.recurringId,
       allocations: existing?.allocations,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
@@ -331,13 +336,17 @@ export async function saveDocument(db: LedgerDB, companyId: string, input: DocIn
     if (status === 'posted') {
       if (doc.total <= 0) throw new AccountingError('The total must be more than zero to post.')
       const contact = doc.contactId ? await db.contacts.get(doc.contactId) : undefined
-      const posting = await buildPosting(db, doc, totals, ctx, info)
+      // A document's first posting gets ids every device agrees on, so two devices approving the same
+      // draft (or creating the same recurring document) don't post it twice. Later edits post fresh entries.
+      const idSeed = !existing ? opts.idSeed : existing.status === 'draft' && !existing.entryId ? `${doc.id}/approve` : undefined
+      const posting = await buildPosting(db, doc, totals, ctx, info, idSeed)
       const entry = await postGeneratedEntry(db, companyId, {
         date: doc.date,
         memo: `${info.label} ${doc.number}${contact ? ` · ${contact.name}` : ''}`,
         reference: doc.reference,
         source: 'document',
         docId: doc.id,
+        idSeed,
         lines: posting.lines,
       })
       doc.entryId = entry.id

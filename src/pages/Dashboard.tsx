@@ -3,6 +3,7 @@ import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  BellRing,
   CircleAlert,
   CircleCheck,
   ClipboardList,
@@ -36,6 +37,7 @@ import { useCompany, useFormat } from '../state/company'
 import { useAccounts, useContacts, useItems, useLedgerDocs, useLines, useStockMoves } from '../state/data'
 import { setPrefs, usePrefs } from '../state/prefs'
 import { useSyncState } from '../sync/controller'
+import { useDueReminders } from './docs/Reminders'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -50,6 +52,7 @@ export function Dashboard() {
   const accounts = useAccounts(company.id)
   const lines = useLines(company.id)
   const { docs, settled } = useLedgerDocs(company.id)
+  const { due: dueReminders } = useDueReminders(company)
   const contacts = useContacts(company.id)
   const items = useItems(company.id)
   const moves = useStockMoves(company.id)
@@ -138,6 +141,7 @@ export function Dashboard() {
   const todo: { icon: LucideIcon; text: string; to: string; tone: 'danger' | 'warning' | 'primary' }[] = []
   if (work.overdueInvoices.length)
     todo.push({ icon: FileText, tone: 'danger', to: '/sales/invoices', text: `${work.overdueInvoices.length} overdue invoice${work.overdueInvoices.length > 1 ? 's' : ''} · ${f.money(work.overdueInvoices.reduce((s, x) => s + x.due, 0))}` })
+  if (dueReminders?.length) todo.push({ icon: BellRing, tone: 'warning', to: '/sales/reminders', text: `${dueReminders.length} payment reminder${dueReminders.length > 1 ? 's' : ''} to send` })
   if (work.billsDue.length) todo.push({ icon: ShoppingCart, tone: 'warning', to: '/purchases/bills', text: `${work.billsDue.length} bill${work.billsDue.length > 1 ? 's' : ''} due this week · ${f.money(work.billsDue.reduce((s, x) => s + x.due, 0))}` })
   if (toReview) todo.push({ icon: Landmark, tone: 'primary', to: '/banking/review', text: `${toReview} bank statement line${toReview > 1 ? 's' : ''} to review` })
   if (work.quotesWaiting) todo.push({ icon: ClipboardList, tone: 'primary', to: '/sales/quotes', text: `${work.quotesWaiting} accepted quote${work.quotesWaiting > 1 ? 's' : ''} to invoice` })

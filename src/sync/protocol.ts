@@ -17,6 +17,8 @@ export const SYNC_TABLES = [
   'bankRules',
   'reconciliations',
   'attachments',
+  'recurring',
+  'reminders',
 ] as const
 export type SyncTable = (typeof SYNC_TABLES)[number]
 

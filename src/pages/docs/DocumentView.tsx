@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, Ban, Check, Copy, CreditCard, Mail, MessageCircle, MoreHorizontal, Pencil, Printer, Repeat, Send, Share2, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Ban, BellRing, CalendarSync, Check, Copy, CreditCard, Mail, MessageCircle, MoreHorizontal, Pencil, Printer, Repeat, Send, Share2, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { getCountry } from '../../accounting/countries'
@@ -27,10 +27,12 @@ import { Menu, MenuItem } from '../../components/ui/menu'
 import { useToast } from '../../components/ui/toast'
 import { db } from '../../db'
 import type { Allocation, Contact, Doc, DocType } from '../../db/types'
-import { fromISODate, today } from '../../lib/dates'
+import { fromISODate, toISODate, today } from '../../lib/dates'
 import { useCompany, useFormat } from '../../state/company'
 import { useLedgerDocs, useTaxRates } from '../../state/data'
-import { Totals } from './DocumentForm'
+import { daysOverdue as daysPast, reachedStage, reminderSettings } from '../../accounting/reminders'
+import { recurringPath, Totals } from './DocumentForm'
+import { ReminderDialog } from './Reminders'
 
 export function DocumentView({ type }: { type: DocType }) {
   const info = DOC_TYPES[type]
@@ -45,6 +47,9 @@ export function DocumentView({ type }: { type: DocType }) {
   const { docs, payments, settled } = useLedgerDocs(company.id)
   const [confirm, setConfirm] = useState<'void' | 'delete' | null>(null)
   const [applying, setApplying] = useState(false)
+  const [reminding, setReminding] = useState(false)
+  const reminders = useLiveQuery(() => db.reminders.where('documentId').equals(id).toArray(), [id])
+  const schedule = useLiveQuery(async () => (doc?.recurringId ? ((await db.recurring.get(doc.recurringId)) ?? null) : null), [doc?.recurringId])
 
   const totals = useMemo(() => (doc && taxRates ? computeTotals(doc.lines, new Map(taxRates.map((t) => [t.id, t])), doc.taxInclusive, info.side) : null), [doc, taxRates, info.side])
 
@@ -111,6 +116,9 @@ export function DocumentView({ type }: { type: DocType }) {
   const editable = doc.status !== 'void' && doc.status !== 'converted'
   const paymentsPath = `${info.side === 'sales' ? '/sales' : '/purchases'}/payments/new?doc=${doc.id}`
   const daysOverdue = state === 'overdue' && doc.dueDate ? Math.floor((fromISODate(today()).getTime() - fromISODate(doc.dueDate).getTime()) / 86_400_000) : 0
+  const canRemind = type === 'invoice' && doc.status === 'posted' && due > 0 && !!doc.dueDate
+  const stage = doc.dueDate ? reachedStage(reminderSettings(company), daysPast(doc.dueDate)) : undefined
+  const canRepeat = (type === 'invoice' || type === 'bill' || type === 'expense') && doc.status !== 'void'
 
   return (
     <div>
@@ -170,7 +178,12 @@ export function DocumentView({ type }: { type: DocType }) {
               Edit
             </LinkButton>
           )}
-          <ShareMenu doc={doc} contact={contact ?? undefined} due={due} />
+          {canRemind && state === 'overdue' && (
+            <Button icon={<BellRing />} onClick={() => setReminding(true)}>
+              Send reminder
+            </Button>
+          )}
+          <ShareMenu doc={doc} contact={contact ?? undefined} due={due} onRemind={canRemind && state !== 'overdue' ? () => setReminding(true) : undefined} />
           <Menu
             align="end"
             trigger={({ toggle }) => (
@@ -187,6 +200,11 @@ export function DocumentView({ type }: { type: DocType }) {
                 <MenuItem icon={<Copy />} onClick={() => (close(), void duplicate())}>
                   Duplicate
                 </MenuItem>
+                {canRepeat && (
+                  <MenuItem icon={<CalendarSync />} onClick={() => (close(), navigate(`${recurringPath(info.side)}/new?from=${doc.id}`))}>
+                    Make recurring
+                  </MenuItem>
+                )}
                 {type === 'quote' && (doc.status === 'sent' || doc.status === 'draft') && (
                   <>
                     <MenuItem icon={<Check />} onClick={() => (close(), void run(() => setDocumentStatus(db, doc.id, 'accepted'), 'Marked as accepted'))}>
@@ -257,6 +275,31 @@ export function DocumentView({ type }: { type: DocType }) {
               </Link>
             </Card>
           )}
+          {schedule && (
+            <Card className="p-4 text-sm">
+              <h2 className="mb-1 text-sm font-semibold">Recurring</h2>
+              <p className="text-fg-muted">
+                Created by{' '}
+                <Link to={`${recurringPath(info.side)}/${schedule.id}`} className="font-medium text-primary-ink hover:underline">
+                  {schedule.name}
+                </Link>
+              </p>
+            </Card>
+          )}
+          {type === 'invoice' && reminders && reminders.length > 0 && (
+            <Card className="p-4 text-sm">
+              <h2 className="mb-2 text-sm font-semibold">Reminders sent</h2>
+              <ul className="space-y-1 text-fg-muted">
+                {[...reminders]
+                  .sort((a, b) => b.sentAt - a.sentAt)
+                  .map((r) => (
+                    <li key={r.id}>
+                      {f.date(toISODate(new Date(r.sentAt)))} · {r.channel === 'manual' ? 'marked as sent' : r.channel === 'copy' ? 'copied' : `by ${r.channel === 'whatsapp' ? 'WhatsApp' : 'email'}`}
+                    </li>
+                  ))}
+              </ul>
+            </Card>
+          )}
           {(doc.convertedFromId || doc.convertedToId) && (
             <Card className="p-4 text-sm">
               <ConvertedLinks doc={doc} docs={docs} />
@@ -270,6 +313,9 @@ export function DocumentView({ type }: { type: DocType }) {
       </div>
 
       {applying && <ApplyCreditDialog credit={doc} docs={docs} settled={settled} onClose={() => setApplying(false)} />}
+      {reminding && doc.dueDate && stage && (
+        <ReminderDialog doc={doc} due={due} stageIndex={stage.index} tone={stage.stage.tone} daysOverdue={daysPast(doc.dueDate)} onClose={() => setReminding(false)} />
+      )}
       <ConfirmDialog
         open={confirm === 'void'}
         onClose={() => setConfirm(null)}
@@ -465,7 +511,7 @@ export function Paper({ doc, contact, totals, paid }: { doc: Doc; contact?: Cont
   )
 }
 
-function ShareMenu({ doc, contact, due }: { doc: Doc; contact?: Contact; due: number }) {
+function ShareMenu({ doc, contact, due, onRemind }: { doc: Doc; contact?: Contact; due: number; onRemind?: () => void }) {
   const company = useCompany()
   const f = useFormat()
   const toast = useToast()
@@ -522,6 +568,11 @@ function ShareMenu({ doc, contact, due }: { doc: Doc; contact?: Contact; due: nu
           <MenuItem icon={<Printer />} onClick={() => (close(), window.print())}>
             Save as PDF
           </MenuItem>
+          {onRemind && (
+            <MenuItem icon={<BellRing />} onClick={() => (close(), onRemind())}>
+              Send payment reminder
+            </MenuItem>
+          )}
         </>
       )}
     </Menu>

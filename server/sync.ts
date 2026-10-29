@@ -21,7 +21,7 @@ type Data = Record<string, unknown>
 class Reject extends Error {}
 
 const TABLES = new Set<string>(SYNC_TABLES)
-const DELETABLE = new Set<SyncTable>(['accounts', 'taxRates', 'contacts', 'items', 'documents', 'stockMoves', 'bankRules', 'attachments', 'reconciliations'])
+const DELETABLE = new Set<SyncTable>(['accounts', 'taxRates', 'contacts', 'items', 'documents', 'stockMoves', 'bankRules', 'attachments', 'reconciliations', 'recurring', 'reminders'])
 /** Records that never change once written. */
 const IMMUTABLE = new Set<SyncTable>(['journalLines', 'audit', 'stockMoves'])
 

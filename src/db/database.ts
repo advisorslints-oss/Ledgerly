@@ -17,6 +17,8 @@ import type {
   MetaRecord,
   Payment,
   Reconciliation,
+  Recurring,
+  Reminder,
   StockMove,
   TaxRate,
 } from './types'
@@ -36,6 +38,8 @@ export const COMPANY_TABLES = [
   'bankRules',
   'reconciliations',
   'attachments',
+  'recurring',
+  'reminders',
 ] as const
 export type CompanyTable = (typeof COMPANY_TABLES)[number]
 
@@ -56,6 +60,8 @@ export class LedgerDB extends Dexie {
   bankRules!: EntityTable<BankRule, 'id'>
   reconciliations!: EntityTable<Reconciliation, 'id'>
   attachments!: EntityTable<Attachment, 'id'>
+  recurring!: EntityTable<Recurring, 'id'>
+  reminders!: EntityTable<Reminder, 'id'>
   audit!: EntityTable<AuditEvent, 'id'>
   changes!: EntityTable<ChangeRecord, 'seq'>
   meta!: EntityTable<MetaRecord, 'key'>
@@ -94,6 +100,10 @@ export class LedgerDB extends Dexie {
       })
       // Outbox rows from version 1 have no batch or company; nothing had synced yet, so start clean.
       .upgrade((tx) => tx.table('changes').clear())
+    this.version(3).stores({
+      recurring: 'id, companyId',
+      reminders: 'id, companyId, documentId',
+    })
   }
 
   /**

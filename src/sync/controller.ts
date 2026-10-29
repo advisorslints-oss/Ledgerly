@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react'
 import { deleteCompany } from '../accounting/company'
 import { errorMessage } from '../accounting/errors'
+import { runRecurring } from '../accounting/recurring'
 import { db } from '../db'
+import type { Doc } from '../db/types'
 import { ApiClient, ApiError } from './api'
 import { downloadCompany, readMeta, syncOnce, uploadCompany, writeMeta, type SyncMeta } from './engine'
 import type { Member, Role } from './protocol'
@@ -58,6 +60,54 @@ export async function startSync(): Promise<void> {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && schedule(0))
   setInterval(() => document.visibilityState === 'visible' && schedule(0), 30_000)
   if (meta.session) schedule(0)
+  void runSchedules('local')
+  setInterval(() => void runSchedules('local'), 60 * 60_000)
+}
+
+const createdListeners = new Set<(docs: Doc[]) => void>()
+// Documents created before anything was listening (e.g. at startup, before the app has drawn).
+let unseen: Doc[] = []
+
+/** Called with the documents recurring schedules create in the background. */
+export function onRecurringCreated(fn: (docs: Doc[]) => void): () => void {
+  createdListeners.add(fn)
+  if (unseen.length) fn(unseen.splice(0))
+  return () => createdListeners.delete(fn)
+}
+
+let runningSchedules: Promise<void> | null = null
+
+/**
+ * Creates the recurring documents that are due. A business that only lives on this device runs any time.
+ * A synced one runs only straight after this device has caught up with the server, so it doesn't create
+ * an invoice another device already created (and perhaps edited) while this one was offline.
+ */
+function runSchedules(which: 'local' | 'synced'): Promise<void> {
+  runningSchedules ??= (async () => {
+    try {
+      const synced = state.meta.session ? state.meta.synced : []
+      const ids = (await db.companies.toArray()).map((c) => c.id).filter((id) => (which === 'synced') === synced.includes(id) && !db.readOnlyCompanies.has(id))
+      const created: Doc[] = []
+      for (const id of ids) {
+        // Only one tab creates documents at a time.
+        const run = () => runRecurring(db, id)
+        created.push(...(navigator.locks ? await navigator.locks.request('ledgerly-recurring', run) : await run()))
+      }
+      if (created.length && createdListeners.size) createdListeners.forEach((l) => l(created))
+      else unseen.push(...created)
+    } catch (err) {
+      console.error('Recurring documents', err)
+    } finally {
+      runningSchedules = null
+    }
+  })()
+  return runningSchedules
+}
+
+/** After a schedule is saved: creates what's due now, or, for a synced business, syncs first. */
+export async function runSchedulesNow(): Promise<void> {
+  await runSchedules('local')
+  if (state.meta.session && state.meta.synced.length) await syncNow()
 }
 
 function schedule(delay: number) {
@@ -82,6 +132,7 @@ export function syncNow(): Promise<void> {
       // Only one tab syncs at a time; the others wait their turn.
       const meta = navigator.locks ? await navigator.locks.request('ledgerly-sync', () => syncOnce(db, client)) : await syncOnce(db, client)
       set({ meta, status: 'idle', error: undefined })
+      void runSchedules('synced')
     } catch (err) {
       await handleError(err)
     } finally {

@@ -50,8 +50,8 @@ The app is organised into sections, each with its own tabs, so no screen is crow
 | Section | Tabs |
 |---|---|
 | **Home** | Key figures, income vs expenses, to-do list, money owed to you, bills to pay, cash position, health check |
-| **Sales** | Invoices · Quotes · Payments received · Credit notes · Customers |
-| **Purchases** | Bills · Expenses · Purchase orders · Payments made · Supplier credits · Suppliers |
+| **Sales** | Invoices · Quotes · Payments received · Reminders · Recurring · Credit notes · Customers |
+| **Purchases** | Bills · Expenses · Purchase orders · Payments made · Recurring · Supplier credits · Suppliers |
 | **Banking** | Accounts · Transactions · Statement review (CSV import, matching, rules) · Reconcile · Rules |
 | **Items** | Products & services · Stock (average cost, low-stock alerts, adjustments) |
 | **Accounting** | Journal · Chart of accounts · Opening balances |
@@ -64,6 +64,8 @@ Highlights:
 - **Taxes per line**, with multi-part rates (e.g. CGST + SGST), tax-inclusive prices, and unclaimable purchase tax added to cost.
 - **Printable documents** with your logo and colour; share by WhatsApp or email, or save as PDF.
 - **Receipts and files** attached to any document, including photos from a phone camera.
+- **Recurring invoices, bills and expenses**: weekly, monthly, quarterly or yearly, ending never, on a date or after a number of times, approved automatically or saved as drafts. Dates missed while the app was closed are caught up; each occurrence has a fixed id, so two devices can't create it twice. For a synced business, a device only creates them right after it has caught up with the server.
+- **Payment reminders**: unpaid invoices show up under Sales → Reminders at the stages you choose (before due, on the day, a week late…), with a friendly, firm or final message to send from your own WhatsApp or email. Each one sent is logged on the invoice.
 - **Simple and accountant modes**, a command bar (Ctrl/⌘+K), dark mode, 12 industry templates and 18 country tax presets.
 
 ## Project layout
@@ -80,6 +82,6 @@ tests/            End-to-end tests with two devices syncing through a real serve
 
 ## Roadmap
 
-1. **Recurring invoices and bills**, payment reminders, and online payment links.
+1. **Online payment links**, and sending reminders automatically by email from the server.
 2. **Budgets, fixed assets with depreciation, projects and job costing.**
 3. **Multi-currency**, password reset by email, native desktop (Tauri) and store apps (Capacitor), AI receipt reading.

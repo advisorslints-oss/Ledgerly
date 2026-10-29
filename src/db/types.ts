@@ -62,6 +62,21 @@ export interface DocumentSettings {
   invoiceNotes?: string
   invoiceTerms?: string
   bankDetails?: string
+  reminders?: ReminderSettings
+}
+
+export type ReminderTone = 'gentle' | 'firm' | 'final'
+
+export interface ReminderStage {
+  /** Days relative to the due date: -3 is three days before, 7 is a week late. */
+  days: number
+  tone: ReminderTone
+}
+
+export interface ReminderSettings {
+  enabled: boolean
+  stages: ReminderStage[]
+  templates: Record<ReminderTone, string>
 }
 
 export interface Company {
@@ -263,8 +278,60 @@ export interface Doc {
   convertedToId?: string
   /** Credit notes and supplier credits: invoices or bills this credit has been applied to. */
   allocations?: Allocation[]
+  /** The recurring schedule that created this document. */
+  recurringId?: string
   createdAt: number
   updatedAt: number
+}
+
+export type RecurringUnit = 'week' | 'month' | 'quarter' | 'year'
+
+/** What each generated document copies. */
+export interface RecurringTemplate {
+  contactId?: string
+  reference?: string
+  lines: DocLine[]
+  taxInclusive: boolean
+  notes?: string
+  terms?: string
+  paidFromAccountId?: string
+  /** Due date is this many days after the document date. */
+  dueInDays: number
+}
+
+/** A schedule that creates an invoice, bill or expense every week, month, quarter or year. */
+export interface Recurring {
+  id: string
+  companyId: string
+  name: string
+  docType: 'invoice' | 'bill' | 'expense'
+  template: RecurringTemplate
+  every: number
+  unit: RecurringUnit
+  startDate: string
+  /** Which occurrence comes next (0 = the start date). Dates are worked out from the start, so months never drift. */
+  nextIndex: number
+  endDate?: string
+  maxCount?: number
+  /** Approve (post) each document straight away, or leave it as a draft to review. */
+  autoApprove: boolean
+  status: 'active' | 'paused' | 'ended'
+  createdCount: number
+  lastDate?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** A payment reminder sent (or marked as sent) for an invoice. */
+export interface Reminder {
+  id: string
+  companyId: string
+  documentId: string
+  contactId?: string
+  /** Index into the reminder stages it covered. */
+  stage: number
+  channel: 'email' | 'whatsapp' | 'copy' | 'manual'
+  sentAt: number
 }
 
 export interface Payment {
