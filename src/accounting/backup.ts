@@ -1,10 +1,28 @@
-import type { LedgerDB } from '../db/database'
-import type { Account, AuditEvent, Company, JournalEntry, JournalLine, TaxRate } from '../db/types'
+import { COMPANY_TABLES, type LedgerDB } from '../db/database'
+import type {
+  Account,
+  Attachment,
+  AuditEvent,
+  BankLine,
+  BankRule,
+  Company,
+  Contact,
+  Doc,
+  Item,
+  JournalEntry,
+  JournalLine,
+  Payment,
+  Reconciliation,
+  StockMove,
+  TaxRate,
+} from '../db/types'
 import { AccountingError } from './errors'
+
+type StoredAttachment = Omit<Attachment, 'data'> & { data: string }
 
 export interface BackupFile {
   format: 'ledgerly-backup'
-  version: 1
+  version: 1 | 2
   exportedAt: string
   company: Company
   accounts: Account[]
@@ -12,26 +30,71 @@ export interface BackupFile {
   journalLines: JournalLine[]
   taxRates: TaxRate[]
   audit: AuditEvent[]
+  contacts?: Contact[]
+  items?: Item[]
+  documents?: Doc[]
+  payments?: Payment[]
+  stockMoves?: StockMove[]
+  bankLines?: BankLine[]
+  bankRules?: BankRule[]
+  reconciliations?: Reconciliation[]
+  attachments?: StoredAttachment[]
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+function base64ToBlob(data: string, type: string): Blob {
+  const binary = atob(data)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type })
 }
 
 export async function exportCompany(db: LedgerDB, companyId: string): Promise<BackupFile> {
-  return db.write(async () => {
+  const data = await db.write(async () => {
     const company = await db.companies.get(companyId)
     if (!company) throw new AccountingError('Company not found.', 'not_found')
     const at = Date.now()
     await db.companies.update(companyId, { lastBackupAt: at })
+    await db.track(companyId, 'companies', companyId, { fields: ['lastBackupAt'] })
+    const rows = Object.fromEntries(
+      await Promise.all(COMPANY_TABLES.map(async (t) => [t, await db.table(t).where('companyId').equals(companyId).toArray()] as const)),
+    )
     return {
-      format: 'ledgerly-backup',
-      version: 1,
-      exportedAt: new Date(at).toISOString(),
       company: { ...company, lastBackupAt: at },
-      accounts: await db.accounts.where('companyId').equals(companyId).toArray(),
-      journalEntries: await db.journalEntries.where('companyId').equals(companyId).toArray(),
-      journalLines: await db.journalLines.where('companyId').equals(companyId).toArray(),
-      taxRates: await db.taxRates.where('companyId').equals(companyId).toArray(),
+      at,
+      rows,
       audit: await db.audit.where('[companyId+at]').between([companyId, 0], [companyId, Infinity]).toArray(),
     }
   })
+  const attachments = await Promise.all(
+    (data.rows.attachments as Attachment[]).map(async (a) => ({ ...a, data: await blobToBase64(a.data) })),
+  )
+  return {
+    format: 'ledgerly-backup',
+    version: 2,
+    exportedAt: new Date(data.at).toISOString(),
+    company: data.company,
+    accounts: data.rows.accounts,
+    journalEntries: data.rows.journalEntries,
+    journalLines: data.rows.journalLines,
+    taxRates: data.rows.taxRates,
+    audit: data.audit,
+    contacts: data.rows.contacts,
+    items: data.rows.items,
+    documents: data.rows.documents,
+    payments: data.rows.payments,
+    stockMoves: data.rows.stockMoves,
+    bankLines: data.rows.bankLines,
+    bankRules: data.rows.bankRules,
+    reconciliations: data.rows.reconciliations,
+    attachments,
+  }
 }
 
 /** Parses and sanity-checks a backup, including that every entry still balances. */
@@ -42,7 +105,7 @@ export function parseBackup(text: string): BackupFile {
   } catch {
     throw new AccountingError("This file isn't a Ledgerly backup.")
   }
-  if (data?.format !== 'ledgerly-backup' || data.version !== 1 || !data.company?.id) {
+  if (data?.format !== 'ledgerly-backup' || (data.version !== 1 && data.version !== 2) || !data.company?.id) {
     throw new AccountingError("This file isn't a Ledgerly backup, or it's from a newer version.")
   }
   for (const key of ['accounts', 'journalEntries', 'journalLines', 'taxRates', 'audit'] as const) {
@@ -66,18 +129,28 @@ export function parseBackup(text: string): BackupFile {
 /** Restores a backup, replacing that company's data on this device if it already exists. */
 export async function restoreBackup(db: LedgerDB, backup: BackupFile): Promise<void> {
   const id = backup.company.id
-  await db.write(async () => {
-    for (const table of [db.accounts, db.journalEntries, db.journalLines, db.taxRates] as const) {
-      await table.where('companyId').equals(id).delete()
-    }
+  const attachments: Attachment[] = (backup.attachments ?? []).map((a) => ({ ...a, data: base64ToBlob(a.data, a.type) }))
+  const rows: Record<(typeof COMPANY_TABLES)[number], unknown[]> = {
+    accounts: backup.accounts,
+    journalEntries: backup.journalEntries,
+    journalLines: backup.journalLines,
+    taxRates: backup.taxRates,
+    contacts: backup.contacts ?? [],
+    items: backup.items ?? [],
+    documents: backup.documents ?? [],
+    payments: backup.payments ?? [],
+    stockMoves: backup.stockMoves ?? [],
+    bankLines: backup.bankLines ?? [],
+    bankRules: backup.bankRules ?? [],
+    reconciliations: backup.reconciliations ?? [],
+    attachments,
+  }
+  await db.transaction('rw', db.tables, async () => {
+    for (const table of COMPANY_TABLES) await db.table(table).where('companyId').equals(id).delete()
     await db.audit.where('[companyId+at]').between([id, 0], [id, Infinity]).delete()
-    await db.companies.put(backup.company)
-    await db.accounts.bulkPut(backup.accounts)
-    await db.journalEntries.bulkPut(backup.journalEntries)
-    await db.journalLines.bulkPut(backup.journalLines)
-    await db.taxRates.bulkPut(backup.taxRates)
+    await db.companies.put({ ...backup.company, nextNumbers: { ...backup.company.nextNumbers } })
+    for (const table of COMPANY_TABLES) if (rows[table].length) await db.table(table).bulkPut(rows[table])
     await db.audit.bulkPut(backup.audit)
-    await db.track('companies', id)
-    await db.logAudit(id, 'restore', 'company', id, `Restored from a backup made ${backup.exportedAt.slice(0, 10)}`)
   })
+  await db.write(() => db.logAudit(id, 'restore', 'company', id, `Restored from a backup made ${backup.exportedAt.slice(0, 10)}`))
 }

@@ -1,31 +1,39 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  ArrowDownLeft,
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
   CircleAlert,
   CircleCheck,
+  ClipboardList,
   Download,
+  FileText,
   Info,
   Landmark,
+  Package,
+  Plus,
+  Receipt,
+  ShoppingCart,
   Wallet,
   X,
+  type LucideIcon,
 } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
+import { DOC_TYPES, docState } from '../accounting/documents'
+import { stockLevels } from '../accounting/items'
 import { computeTrialBalance, monthlyResults, naturalBalance, netIncome, totalsByAccount } from '../accounting/reports'
 import { IncomeExpenseChart } from '../components/charts/IncomeExpenseChart'
-import { useQuickEntry } from '../components/QuickEntry'
+import { StateBadge } from '../components/StateBadge'
 import { Button, LinkButton } from '../components/ui/button'
 import { Card, CardHeader, Spinner } from '../components/ui/misc'
 import { db } from '../db'
-import type { Account, JournalEntry } from '../db/types'
+import type { Account, Doc, JournalEntry } from '../db/types'
 import { cn } from '../lib/cn'
-import { addMonths, fiscalYearStart, monthLabel, startOfMonth, today } from '../lib/dates'
+import { addDays, addMonths, fiscalYearStart, monthLabel, startOfMonth, today } from '../lib/dates'
 import { isStandalone } from '../lib/platform'
 import { useCompany, useFormat } from '../state/company'
-import { useAccounts, useLines } from '../state/data'
+import { useAccounts, useContacts, useItems, useLedgerDocs, useLines, useStockMoves } from '../state/data'
 import { setPrefs, usePrefs } from '../state/prefs'
 
 function greeting(): string {
@@ -38,17 +46,25 @@ const MONEY = new Set(['cash', 'bank'])
 export function Dashboard() {
   const company = useCompany()
   const f = useFormat()
-  const openQuick = useQuickEntry()
   const accounts = useAccounts(company.id)
   const lines = useLines(company.id)
+  const { docs, settled } = useLedgerDocs(company.id)
+  const contacts = useContacts(company.id)
+  const items = useItems(company.id)
+  const moves = useStockMoves(company.id)
   const recent = useLiveQuery(
-    () => db.journalEntries.where('[companyId+date]').between([company.id, ''], [company.id, '￿']).reverse().limit(6).toArray(),
+    () =>
+      db.journalEntries
+        .where('[companyId+date]')
+        .between([company.id, ''], [company.id, '￿'])
+        .reverse()
+        .filter((e) => e.status === 'posted' && e.source !== 'reversal')
+        .limit(6)
+        .toArray(),
     [company.id],
   )
-  const sources = useLiveQuery(async () => {
-    const entries = await db.journalEntries.where('companyId').equals(company.id).toArray()
-    return { opening: entries.some((e) => e.source === 'opening'), manual: entries.some((e) => e.source === 'manual'), count: entries.length }
-  }, [company.id])
+  const toReview = useLiveQuery(() => db.bankLines.where('companyId').equals(company.id).filter((l) => l.status === 'new').count(), [company.id])
+  const hasOpening = useLiveQuery(() => db.journalEntries.where('companyId').equals(company.id).filter((e) => e.source === 'opening').count(), [company.id])
 
   const stats = useMemo(() => {
     if (!accounts || !lines) return null
@@ -57,7 +73,6 @@ export function Dashboard() {
     const totals = totalsByAccount(upToToday)
     const balance = (a: Account) => naturalBalance(a.type, totals.get(a.id) ?? { debit: 0, credit: 0 })
     const sum = (pred: (a: Account) => boolean) => accounts.filter(pred).reduce((s, a) => s + balance(a), 0)
-
     const moneyAccounts = accounts
       .filter((a) => MONEY.has(a.subtype) && (!a.archived || balance(a) !== 0))
       .map((a) => ({ account: a, balance: balance(a) }))
@@ -67,7 +82,6 @@ export function Dashboard() {
     const months = Array.from({ length: 6 }, (_, i) => addMonths(thisMonth, i - 5))
     const monthly = monthlyResults(accounts, lines, months)
     const tb = computeTrialBalance(accounts, lines)
-
     return {
       cash: moneyAccounts.reduce((s, m) => s + m.balance, 0),
       moneyAccounts,
@@ -83,7 +97,32 @@ export function Dashboard() {
     }
   }, [accounts, lines, company.fiscalYearStartMonth])
 
-  if (!stats || !accounts || !recent || !sources) {
+  const work = useMemo(() => {
+    if (!docs || !settled || !items || !moves) return null
+    const now = today()
+    const soon = addDays(now, 7)
+    const open = (type: 'invoice' | 'bill') =>
+      docs
+        .filter((d) => d.type === type && d.status === 'posted')
+        .map((d) => ({ doc: d, due: d.total - (settled.get(d.id) ?? 0), state: docState(d, settled.get(d.id) ?? 0) }))
+        .filter((x) => x.due > 0)
+        .sort((a, b) => (a.doc.dueDate ?? a.doc.date).localeCompare(b.doc.dueDate ?? b.doc.date))
+    const invoices = open('invoice')
+    const bills = open('bill')
+    const levels = stockLevels(moves)
+    return {
+      invoices,
+      bills,
+      overdueInvoices: invoices.filter((x) => x.state === 'overdue'),
+      billsDue: bills.filter((x) => (x.doc.dueDate ?? x.doc.date) <= soon),
+      drafts: docs.filter((d) => d.status === 'draft').length,
+      quotesWaiting: docs.filter((d) => d.type === 'quote' && d.status === 'accepted').length,
+      lowStock: items.filter((i) => i.trackStock && !i.archived && i.reorderLevel !== undefined && (levels.get(i.id)?.quantity ?? 0) <= i.reorderLevel).length,
+      hasInvoice: docs.some((d) => d.type === 'invoice'),
+    }
+  }, [docs, settled, items, moves])
+
+  if (!stats || !work || !accounts || !recent || !contacts || toReview === undefined || hasOpening === undefined) {
     return (
       <div className="grid h-64 place-items-center">
         <Spinner />
@@ -91,9 +130,18 @@ export function Dashboard() {
     )
   }
 
+  const names = new Map(contacts.map((c) => [c.id, c.name]))
   const monthName = monthLabel(stats.thisMonth.month, company.locale)
   const lastMonthName = monthLabel(stats.lastMonth.month, company.locale)
   const profitDelta = stats.thisMonth.profit - stats.lastMonth.profit
+  const todo: { icon: LucideIcon; text: string; to: string; tone: 'danger' | 'warning' | 'primary' }[] = []
+  if (work.overdueInvoices.length)
+    todo.push({ icon: FileText, tone: 'danger', to: '/sales/invoices', text: `${work.overdueInvoices.length} overdue invoice${work.overdueInvoices.length > 1 ? 's' : ''} · ${f.money(work.overdueInvoices.reduce((s, x) => s + x.due, 0))}` })
+  if (work.billsDue.length) todo.push({ icon: ShoppingCart, tone: 'warning', to: '/purchases/bills', text: `${work.billsDue.length} bill${work.billsDue.length > 1 ? 's' : ''} due this week · ${f.money(work.billsDue.reduce((s, x) => s + x.due, 0))}` })
+  if (toReview) todo.push({ icon: Landmark, tone: 'primary', to: '/banking/review', text: `${toReview} bank statement line${toReview > 1 ? 's' : ''} to review` })
+  if (work.quotesWaiting) todo.push({ icon: ClipboardList, tone: 'primary', to: '/sales/quotes', text: `${work.quotesWaiting} accepted quote${work.quotesWaiting > 1 ? 's' : ''} to invoice` })
+  if (work.drafts) todo.push({ icon: Receipt, tone: 'primary', to: '/sales/invoices', text: `${work.drafts} draft document${work.drafts > 1 ? 's' : ''} not yet approved` })
+  if (work.lowStock) todo.push({ icon: Package, tone: 'warning', to: '/items/stock', text: `${work.lowStock} item${work.lowStock > 1 ? 's' : ''} running low on stock` })
 
   return (
     <div>
@@ -103,21 +151,21 @@ export function Dashboard() {
           <h1 className="mt-0.5 text-2xl font-semibold tracking-tight sm:text-[26px]">{company.name}</h1>
         </div>
         <div className="hidden gap-2 sm:flex">
-          <Button onClick={() => openQuick('out')} icon={<ArrowUpRight />}>
-            Money out
-          </Button>
-          <Button variant="primary" onClick={() => openQuick('in')} icon={<ArrowDownLeft />}>
-            Money in
-          </Button>
+          <LinkButton to="/purchases/expenses/new" icon={<Receipt />}>
+            Expense
+          </LinkButton>
+          <LinkButton to="/sales/invoices/new" variant="primary" icon={<Plus />}>
+            New invoice
+          </LinkButton>
         </div>
       </header>
 
-      <GettingStarted hasOpening={sources.opening || !!company.isDemo} hasManual={sources.manual} />
+      <GettingStarted hasOpening={hasOpening > 0 || !!company.isDemo} hasInvoice={work.hasInvoice} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-        <StatTile label="Cash & bank" value={f.money(stats.cash)} note={`${stats.moneyAccounts.length} account${stats.moneyAccounts.length === 1 ? '' : 's'}`} to="/reports/balance-sheet" />
-        <StatTile label="Owed to you" value={f.money(stats.receivable)} note="By customers" to="/reports/balance-sheet" />
-        <StatTile label="You owe" value={f.money(stats.payable)} note="Suppliers & cards" to="/reports/balance-sheet" />
+        <StatTile label="Cash & bank" value={f.money(stats.cash)} note={`${stats.moneyAccounts.length} account${stats.moneyAccounts.length === 1 ? '' : 's'}`} to="/banking/accounts" />
+        <StatTile label="Owed to you" value={f.money(stats.receivable)} note={work.overdueInvoices.length ? <span className="text-danger">{f.money(work.overdueInvoices.reduce((s, x) => s + x.due, 0))} overdue</span> : 'By customers'} to="/reports/aged-receivables" />
+        <StatTile label="You owe" value={f.money(stats.payable)} note="Suppliers & cards" to="/reports/aged-payables" />
         <StatTile
           label={`Profit in ${monthName}`}
           value={f.money(stats.thisMonth.profit)}
@@ -154,15 +202,42 @@ export function Dashboard() {
         </Card>
 
         <Card>
+          <CardHeader title="To do" description={todo.length ? 'Things that need you' : undefined} />
+          {todo.length === 0 ? (
+            <div className="flex items-center gap-3 px-5 pb-5 text-sm text-fg-muted">
+              <CircleCheck className="size-5 text-success" /> You're all caught up.
+            </div>
+          ) : (
+            <ul className="px-2 pb-3">
+              {todo.map((t) => {
+                const Icon = t.icon
+                return (
+                  <li key={t.text}>
+                    <Link to={t.to} className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-surface-2">
+                      <span className={cn('grid size-8 shrink-0 place-items-center rounded-lg', t.tone === 'danger' ? 'bg-danger-soft text-danger' : t.tone === 'warning' ? 'bg-warning-soft text-warning' : 'bg-primary-soft text-primary-ink')}>
+                        <Icon className="size-4" />
+                      </span>
+                      <span className="min-w-0 flex-1 text-sm text-fg">{t.text}</span>
+                      <ArrowRight className="size-4 shrink-0 text-fg-subtle" />
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Card>
+
+        <OpenDocs title="Owed to you" empty="No unpaid invoices." rows={work.invoices} names={names} more="/sales/invoices" newTo="/sales/invoices/new" newLabel="New invoice" />
+        <OpenDocs title="Bills to pay" empty="No unpaid bills." rows={work.bills} names={names} more="/purchases/bills" newTo="/purchases/bills/new" newLabel="New bill" />
+
+        <Card>
           <CardHeader title="Cash position" description="Money available right now" />
           <ul className="px-2 pb-3">
             {stats.moneyAccounts.length === 0 && <li className="px-3 py-4 text-sm text-fg-subtle">No cash or bank accounts yet.</li>}
             {stats.moneyAccounts.map(({ account, balance }) => (
               <li key={account.id}>
-                <Link to={`/accounts/${account.id}`} className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-surface-2">
-                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-fg-muted">
-                    {account.subtype === 'cash' ? <Wallet className="size-4" /> : <Landmark className="size-4" />}
-                  </span>
+                <Link to={`/banking/transactions?account=${account.id}`} className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-surface-2">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-fg-muted">{account.subtype === 'cash' ? <Wallet className="size-4" /> : <Landmark className="size-4" />}</span>
                   <span className="min-w-0 flex-1 truncate text-sm text-fg">{account.name}</span>
                   <span className={cn('text-sm font-medium tabular-nums', balance < 0 ? 'text-danger' : 'text-fg')}>{f.money(balance)}</span>
                 </Link>
@@ -183,14 +258,68 @@ export function Dashboard() {
           <RecentList entries={recent} />
         </Card>
 
-        <HealthCheck
-          balanced={stats.balanced}
-          negativeMoney={stats.negativeMoney.map((m) => m.account.name)}
-          hasEntries={sources.count > 0}
-          oldestEntry={stats.oldestEntry}
-        />
+        <HealthCheck balanced={stats.balanced} negativeMoney={stats.negativeMoney.map((m) => m.account.name)} hasEntries={stats.oldestEntry < today() || recent.length > 0} oldestEntry={stats.oldestEntry} />
       </div>
     </div>
+  )
+}
+
+function OpenDocs({
+  title,
+  empty,
+  rows,
+  names,
+  more,
+  newTo,
+  newLabel,
+}: {
+  title: string
+  empty: string
+  rows: { doc: Doc; due: number; state: string }[]
+  names: Map<string, string>
+  more: string
+  newTo: string
+  newLabel: string
+}) {
+  const f = useFormat()
+  return (
+    <Card>
+      <CardHeader
+        title={title}
+        description={rows.length ? `${f.money(rows.reduce((s, r) => s + r.due, 0))} across ${rows.length}` : undefined}
+        actions={
+          <LinkButton to={more} variant="ghost" size="sm">
+            All <ArrowRight />
+          </LinkButton>
+        }
+      />
+      {rows.length === 0 ? (
+        <div className="px-5 pb-5">
+          <p className="text-sm text-fg-subtle">{empty}</p>
+          <LinkButton to={newTo} size="sm" variant="soft" className="mt-3" icon={<Plus />}>
+            {newLabel}
+          </LinkButton>
+        </div>
+      ) : (
+        <ul className="px-2 pb-3">
+          {rows.slice(0, 5).map(({ doc, due, state }) => (
+            <li key={doc.id}>
+              <Link to={`${DOC_TYPES[doc.type].path}/${doc.id}`} className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-surface-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-fg">{names.get(doc.contactId ?? '') ?? doc.number}</span>
+                  <span className="block text-xs text-fg-subtle">
+                    {doc.number}
+                    {doc.dueDate ? ` · due ${f.date(doc.dueDate, 'short')}` : ''}
+                  </span>
+                </span>
+                {state === 'overdue' && <StateBadge state={state} />}
+                <span className="text-sm font-medium tabular-nums">{f.money(due)}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
 
@@ -206,14 +335,13 @@ function StatTile({ label, value, note, to, negative }: { label: string; value: 
 
 function RecentList({ entries }: { entries: JournalEntry[] }) {
   const f = useFormat()
-  const openQuick = useQuickEntry()
   if (entries.length === 0) {
     return (
       <div className="px-5 pb-6">
         <p className="text-sm text-fg-subtle">Nothing recorded yet.</p>
-        <Button className="mt-3" size="sm" variant="soft" onClick={() => openQuick('in')}>
-          Record your first transaction
-        </Button>
+        <LinkButton to="/sales/invoices/new" className="mt-3" size="sm" variant="soft">
+          Create your first invoice
+        </LinkButton>
       </div>
     )
   }
@@ -224,7 +352,7 @@ function RecentList({ entries }: { entries: JournalEntry[] }) {
           <Link to={`/journal/${e.id}`} className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-surface-2">
             <span className="w-14 shrink-0 text-xs text-fg-subtle">{f.date(e.date, 'short')}</span>
             <span className="min-w-0 flex-1">
-              <span className={cn('block truncate text-sm text-fg', e.status === 'reversed' && 'line-through decoration-fg-subtle')}>{e.memo || 'Journal entry'}</span>
+              <span className="block truncate text-sm text-fg">{e.memo || 'Journal entry'}</span>
               <span className="block text-xs text-fg-subtle">{e.number}</span>
             </span>
             <span className="text-sm font-medium text-fg tabular-nums">{f.money(e.total)}</span>
@@ -246,9 +374,7 @@ function HealthCheck({ balanced, negativeMoney, hasEntries, oldestEntry }: { bal
       ? { tone: 'good', title: 'Books are balanced', text: 'Total debits equal total credits.' }
       : { tone: 'warn', title: 'Books are out of balance', text: 'Open the trial balance to investigate.', to: '/reports/trial-balance' },
   ]
-  if (negativeMoney.length) {
-    items.push({ tone: 'warn', title: 'Negative balance', text: `${negativeMoney.join(', ')} is below zero. A deposit may be missing.` })
-  }
+  if (negativeMoney.length) items.push({ tone: 'warn', title: 'Negative balance', text: `${negativeMoney.join(', ')} is below zero. A deposit may be missing.` })
   if (hasEntries) {
     if (daysSinceBackup === null || daysSinceBackup > 7) {
       items.push({
@@ -298,16 +424,15 @@ function HealthCheck({ balanced, negativeMoney, hasEntries, oldestEntry }: { bal
   )
 }
 
-function GettingStarted({ hasOpening, hasManual }: { hasOpening: boolean; hasManual: boolean }) {
+function GettingStarted({ hasOpening, hasInvoice }: { hasOpening: boolean; hasInvoice: boolean }) {
   const company = useCompany()
   const prefs = usePrefs()
-  const openQuick = useQuickEntry()
   if (prefs.dismissedChecklist?.includes(company.id)) return null
 
   const steps = [
     { done: true, title: 'Create your books', action: null },
     { done: hasOpening, title: 'Enter opening balances', action: <LinkButton to="/accounts/opening-balances" size="sm" variant="soft">Start</LinkButton> },
-    { done: hasManual, title: 'Record a transaction', action: <Button size="sm" variant="soft" onClick={() => openQuick('in')}>Record</Button> },
+    { done: hasInvoice, title: 'Send your first invoice', action: <LinkButton to="/sales/invoices/new" size="sm" variant="soft">Create</LinkButton> },
     { done: !!company.lastBackupAt, title: 'Download a backup', action: <LinkButton to="/settings?tab=data" size="sm" variant="soft" icon={<Download />}>Backup</LinkButton> },
     { done: isStandalone(), title: 'Install the app', action: <LinkButton to="/settings?tab=preferences" size="sm" variant="soft">How</LinkButton> },
   ]
@@ -323,30 +448,17 @@ function GettingStarted({ hasOpening, hasManual }: { hasOpening: boolean; hasMan
             {doneCount} of {steps.length} done
           </p>
         </div>
-        <button
-          type="button"
-          aria-label="Hide setup checklist"
-          onClick={() => setPrefs({ dismissedChecklist: [...(prefs.dismissedChecklist ?? []), company.id] })}
-          className="grid size-8 place-items-center rounded-lg text-fg-subtle hover:bg-surface-2 hover:text-fg"
-        >
-          <X className="size-4" />
-        </button>
+        <Button size="icon" variant="ghost" aria-label="Hide setup checklist" onClick={() => setPrefs({ dismissedChecklist: [...(prefs.dismissedChecklist ?? []), company.id] })}>
+          <X />
+        </Button>
       </div>
       <div className="mx-5 mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3">
         <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(doneCount / steps.length) * 100}%` }} />
       </div>
       <ol className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2 lg:grid-cols-5">
         {steps.map((s, i) => (
-          <li
-            key={s.title}
-            className={cn('flex items-center gap-3 rounded-xl border p-3 lg:flex-col lg:items-start', s.done ? 'border-transparent bg-surface-2/60' : 'border-line')}
-          >
-            <span
-              className={cn(
-                'grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold',
-                s.done ? 'bg-success text-white dark:text-bg' : 'bg-surface-2 text-fg-muted ring-1 ring-line-strong',
-              )}
-            >
+          <li key={s.title} className={cn('flex items-center gap-3 rounded-xl border p-3 lg:flex-col lg:items-start', s.done ? 'border-transparent bg-surface-2/60' : 'border-line')}>
+            <span className={cn('grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold', s.done ? 'bg-success text-white dark:text-bg' : 'bg-surface-2 text-fg-muted ring-1 ring-line-strong')}>
               {s.done ? <CircleCheck className="size-4" /> : i + 1}
             </span>
             <span className={cn('min-w-0 flex-1 text-sm font-medium', s.done ? 'text-fg-subtle line-through' : 'text-fg')}>{s.title}</span>

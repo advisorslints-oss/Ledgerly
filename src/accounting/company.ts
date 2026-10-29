@@ -1,4 +1,4 @@
-import type { LedgerDB } from '../db/database'
+import { COMPANY_TABLES, type LedgerDB } from '../db/database'
 import type { Account, Company, Features, IndustryId, TaxComponent, TaxRate } from '../db/types'
 import { isISODate } from '../lib/dates'
 import { newId } from '../lib/id'
@@ -66,9 +66,9 @@ export async function createCompany(db: LedgerDB, setup: CompanySetup): Promise<
     await db.companies.add(company)
     await db.accounts.bulkAdd(accounts)
     await db.taxRates.bulkAdd(taxRates)
-    await db.track('companies', company.id)
-    await db.track('accounts', accounts.map((x) => x.id))
-    if (taxRates.length) await db.track('taxRates', taxRates.map((x) => x.id))
+    await db.track(company.id, 'companies', company.id)
+    await db.track(company.id, 'accounts', accounts.map((x) => x.id))
+    await db.track(company.id, 'taxRates', taxRates.map((x) => x.id))
     await db.logAudit(company.id, 'create', 'company', company.id, `Created ${name} with ${accounts.length} accounts`)
     return company
   })
@@ -77,7 +77,18 @@ export async function createCompany(db: LedgerDB, setup: CompanySetup): Promise<
 export type CompanyPatch = Partial<
   Pick<
     Company,
-    'name' | 'legalName' | 'taxId' | 'address' | 'email' | 'phone' | 'fiscalYearStartMonth' | 'features' | 'taxName' | 'currency' | 'locale'
+    | 'name'
+    | 'legalName'
+    | 'taxId'
+    | 'address'
+    | 'email'
+    | 'phone'
+    | 'fiscalYearStartMonth'
+    | 'features'
+    | 'taxName'
+    | 'currency'
+    | 'locale'
+    | 'documentSettings'
   >
 >
 
@@ -107,7 +118,7 @@ export async function updateCompany(db: LedgerDB, id: string, patch: CompanyPatc
           updatedAt: at,
         }
         await db.accounts.add(account)
-        await db.track('accounts', account.id)
+        await db.track(id, 'accounts', account.id)
       }
     }
 
@@ -116,7 +127,7 @@ export async function updateCompany(db: LedgerDB, id: string, patch: CompanyPatc
       if (typeof clean[key] === 'string') clean[key] = clean[key].trim()
     }
     await db.companies.update(id, { ...clean, updatedAt: Date.now() })
-    await db.track('companies', id)
+    await db.track(id, 'companies', id, { fields: [...Object.keys(clean), 'updatedAt'] })
     await db.logAudit(id, 'update', 'company', id, 'Updated company settings')
   })
 }
@@ -125,20 +136,19 @@ export async function setLockDate(db: LedgerDB, id: string, lockDate: string | u
   if (lockDate && !isISODate(lockDate)) throw new AccountingError('Enter a valid date.')
   await db.write(async () => {
     await db.companies.update(id, { lockDate: lockDate || undefined, updatedAt: Date.now() })
-    await db.track('companies', id)
+    await db.track(id, 'companies', id, { fields: ['lockDate', 'updatedAt'] })
     await db.logAudit(id, 'lock', 'company', id, lockDate ? `Locked the books up to ${lockDate}` : 'Removed the lock date')
   })
 }
 
 /** Removes a company and everything recorded under it from this device. */
 export async function deleteCompany(db: LedgerDB, id: string): Promise<void> {
-  await db.write(async () => {
-    for (const table of [db.accounts, db.journalEntries, db.journalLines, db.taxRates] as const) {
-      await table.where('companyId').equals(id).delete()
-    }
+  // Removing a business from a device is not a change to sync, so this skips the outbox.
+  await db.transaction('rw', db.tables, async () => {
+    for (const table of COMPANY_TABLES) await db.table(table).where('companyId').equals(id).delete()
     await db.audit.where('[companyId+at]').between([id, 0], [id, Infinity]).delete()
+    await db.changes.where('companyId').equals(id).delete()
     await db.companies.delete(id)
-    await db.track('companies', id, 'delete')
   })
 }
 
@@ -177,7 +187,7 @@ export async function saveTaxRate(db: LedgerDB, companyId: string, input: TaxRat
       updatedAt: at,
     }
     await db.taxRates.put(rate)
-    await db.track('taxRates', rate.id)
+    await db.track(companyId, 'taxRates', rate.id, current ? { fields: ['name', 'components', 'rate', 'updatedAt'] } : {})
     await db.logAudit(companyId, current ? 'update' : 'create', 'taxRate', rate.id, `${current ? 'Updated' : 'Added'} tax rate ${rate.name}`)
     return rate
   })
@@ -188,7 +198,7 @@ export async function setTaxRateArchived(db: LedgerDB, id: string, archived: boo
     const current = await db.taxRates.get(id)
     if (!current) return
     await db.taxRates.update(id, { archived, updatedAt: Date.now() })
-    await db.track('taxRates', id)
+    await db.track(current.companyId, 'taxRates', id, { fields: ['archived', 'updatedAt'] })
     await db.logAudit(current.companyId, archived ? 'archive' : 'restore', 'taxRate', id, `${archived ? 'Archived' : 'Restored'} tax rate ${current.name}`)
   })
 }

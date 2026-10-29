@@ -1,14 +1,37 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BookOpen, CornerDownLeft, FilePlus2, Moon, NotebookPen, Search, Sun, UserCog, type LucideIcon } from 'lucide-react'
+import {
+  ArrowDownLeft,
+  ArrowLeftRight,
+  ArrowUpRight,
+  BarChart3,
+  BookOpen,
+  ClipboardList,
+  CornerDownLeft,
+  FilePlus2,
+  FileText,
+  HandCoins,
+  Moon,
+  NotebookPen,
+  Package,
+  Receipt,
+  Search,
+  ShoppingCart,
+  Sun,
+  UserCog,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
+import { isCustomer } from '../../accounting/contacts'
+import { DOC_TYPES } from '../../accounting/documents'
 import { db } from '../../db'
 import { cn } from '../../lib/cn'
 import { useCompany } from '../../state/company'
 import { setPrefs, usePrefs } from '../../state/prefs'
 import { useQuickEntry } from '../QuickEntry'
 import { Kbd } from '../ui/misc'
-import { navGroups, SETTINGS_ITEM } from './nav'
+import { navItems, SETTINGS_ITEM } from './nav'
 
 interface Command {
   id: string
@@ -54,11 +77,20 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const entries =
     useLiveQuery(() => db.journalEntries.where('[companyId+date]').between([company.id, ''], [company.id, '￿']).reverse().limit(300).toArray(), [company.id]) ??
     []
+  const contacts = useLiveQuery(() => db.contacts.where('companyId').equals(company.id).toArray(), [company.id]) ?? []
+  const documents = useLiveQuery(() => db.documents.where('companyId').equals(company.id).toArray(), [company.id]) ?? []
+  const items = useLiveQuery(() => db.items.where('companyId').equals(company.id).toArray(), [company.id]) ?? []
 
   const commands = useMemo<Command[]>(() => {
     const go = (to: string) => () => navigate(to)
     const dark = document.documentElement.classList.contains('dark')
     const list: Command[] = [
+      { id: 'inv', label: 'New invoice', group: 'Actions', icon: FileText, keywords: 'bill customer sell', run: go('/sales/invoices/new') },
+      { id: 'quote', label: 'New quote', group: 'Actions', icon: ClipboardList, keywords: 'estimate quotation', run: go('/sales/quotes/new') },
+      { id: 'exp', label: 'New expense', group: 'Actions', icon: Receipt, keywords: 'receipt spend purchase', run: go('/purchases/expenses/new') },
+      { id: 'bill', label: 'New bill', group: 'Actions', icon: ShoppingCart, keywords: 'supplier invoice purchase', run: go('/purchases/bills/new') },
+      { id: 'rcpt', label: 'Receive a payment', group: 'Actions', icon: HandCoins, keywords: 'customer paid', run: go('/sales/payments/new') },
+      { id: 'pay', label: 'Pay a supplier', group: 'Actions', icon: HandCoins, keywords: 'bill payment', run: go('/purchases/payments/new') },
       { id: 'in', label: 'Record money in', group: 'Actions', icon: ArrowDownLeft, keywords: 'income sale receipt deposit', run: () => openQuick('in') },
       { id: 'out', label: 'Record money out', group: 'Actions', icon: ArrowUpRight, keywords: 'expense payment spend bill', run: () => openQuick('out') },
       { id: 'transfer', label: 'Transfer between accounts', group: 'Actions', icon: ArrowLeftRight, run: () => openQuick('transfer') },
@@ -79,19 +111,33 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         run: () => setPrefs({ mode: prefs.mode === 'simple' ? 'accountant' : 'simple' }),
       },
     ]
-    for (const item of [...navGroups(company, prefs.mode).flatMap((g) => g.items), SETTINGS_ITEM]) {
-      list.push({ id: `nav-${item.to}`, label: item.label, hint: item.soon ? 'Coming soon' : undefined, group: 'Go to', icon: item.icon, run: go(item.to) })
+    for (const item of [...navItems(), SETTINGS_ITEM]) {
+      list.push({ id: `nav-${item.to}`, label: item.label, group: 'Go to', icon: item.icon, run: go(item.to) })
     }
-    for (const r of [
-      ['Profit & loss', '/reports/profit-and-loss', 'income statement p&l'],
-      ['Balance sheet', '/reports/balance-sheet', 'assets liabilities'],
-      ['Trial balance', '/reports/trial-balance', 'tb'],
-      ['Opening balances', '/accounts/opening-balances', 'start'],
-    ]) {
-      list.push({ id: `nav-${r[1]}`, label: r[0], group: 'Go to', icon: BookOpen, keywords: r[2], run: go(r[1]) })
-    }
+    const pages: [string, string, string, LucideIcon][] = [
+      ['Invoices', '/sales/invoices', 'sales', FileText],
+      ['Quotes', '/sales/quotes', 'estimates', ClipboardList],
+      ['Customers', '/sales/customers', 'clients contacts', Users],
+      ['Bills', '/purchases/bills', 'payables', ShoppingCart],
+      ['Expenses', '/purchases/expenses', 'receipts', Receipt],
+      ['Suppliers', '/purchases/suppliers', 'vendors contacts', Users],
+      ['Bank statement review', '/banking/review', 'import csv match', BookOpen],
+      ['Reconcile', '/banking/reconcile', 'bank statement', BookOpen],
+      ['Stock', '/items/stock', 'inventory', Package],
+      ['Chart of accounts', '/accounts', 'accounts categories', BookOpen],
+      ['Opening balances', '/accounts/opening-balances', 'start', BookOpen],
+      ['Profit & loss', '/reports/profit-and-loss', 'income statement p&l', BarChart3],
+      ['Balance sheet', '/reports/balance-sheet', 'assets liabilities', BarChart3],
+      ['Cash flow', '/reports/cash-flow', 'cash', BarChart3],
+      ['Aged receivables', '/reports/aged-receivables', 'debtors owed', BarChart3],
+      ['Aged payables', '/reports/aged-payables', 'creditors', BarChart3],
+      ['Tax summary', '/reports/tax-summary', 'gst vat return', BarChart3],
+      ['Trial balance', '/reports/trial-balance', 'tb', BarChart3],
+      ['General ledger', '/reports/general-ledger', 'gl', BarChart3],
+    ]
+    for (const [label, to, keywords, icon] of pages) list.push({ id: `nav-${to}`, label, group: 'Go to', icon, keywords, run: go(to) })
     return list
-  }, [company, prefs.mode, navigate, openQuick])
+  }, [prefs.mode, navigate, openQuick])
 
   const q = query.trim().toLowerCase()
   const results = useMemo(() => {
@@ -106,8 +152,21 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       .filter((e) => match(e.number) || match(e.memo) || (e.reference && match(e.reference)))
       .slice(0, 6)
       .map((e) => ({ id: e.id, label: e.memo || e.number, hint: `${e.number} · ${e.date}`, group: 'Transactions', icon: NotebookPen, run: () => navigate(`/journal/${e.id}`) }))
-    return [...cmds, ...acctResults, ...entryResults]
-  }, [commands, accounts, entries, q, navigate])
+    const contactResults: Command[] = contacts
+      .filter((c) => !c.archived && (match(c.name) || (c.email && match(c.email))))
+      .slice(0, 6)
+      .map((c) => ({ id: c.id, label: c.name, hint: isCustomer(c) ? 'Customer' : 'Supplier', group: 'Contacts', icon: Users, run: () => navigate(`${isCustomer(c) ? '/sales/customers' : '/purchases/suppliers'}/${c.id}`) }))
+    const names = new Map(contacts.map((c) => [c.id, c.name]))
+    const docResults: Command[] = documents
+      .filter((d) => match(d.number) || (d.reference && match(d.reference)) || (d.contactId && match(names.get(d.contactId) ?? '')))
+      .slice(0, 8)
+      .map((d) => ({ id: d.id, label: `${DOC_TYPES[d.type].label} ${d.number}`, hint: names.get(d.contactId ?? '') ?? d.date, group: 'Documents', icon: FileText, run: () => navigate(`${DOC_TYPES[d.type].path}/${d.id}`) }))
+    const itemResults: Command[] = items
+      .filter((i) => !i.archived && (match(i.name) || (i.sku && match(i.sku))))
+      .slice(0, 5)
+      .map((i) => ({ id: i.id, label: i.name, hint: i.sku, group: 'Items', icon: Package, run: () => navigate(`/items/${i.id}`) }))
+    return [...cmds, ...contactResults, ...docResults, ...itemResults, ...acctResults, ...entryResults]
+  }, [commands, accounts, entries, contacts, documents, items, q, navigate])
 
   useEffect(() => setActive(0), [q])
 
@@ -142,7 +201,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
               run(results[active])
             }
           }}
-          placeholder="Search actions, pages, accounts, transactions…"
+          placeholder="Search customers, invoices, items, pages…"
           aria-label="Search"
           className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-fg placeholder:text-fg-subtle focus:outline-none"
         />

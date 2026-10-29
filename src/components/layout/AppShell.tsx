@@ -3,20 +3,23 @@ import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowUpRight,
+  Banknote,
   Check,
   ChevronsUpDown,
+  ClipboardList,
   CloudOff,
-  FilePlus2,
+  FileText,
+  HandCoins,
   LayoutDashboard,
   Menu as MenuIcon,
   Moon,
   NotebookPen,
   Plus,
+  Receipt,
   Search,
   ShieldCheck,
+  ShoppingCart,
   Sun,
-  BarChart3,
-  Receipt,
   X,
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
@@ -30,32 +33,31 @@ import { setPrefs, usePrefs } from '../../state/prefs'
 import { useQuickEntry } from '../QuickEntry'
 import { Dialog } from '../ui/dialog'
 import { Menu, MenuItem } from '../ui/menu'
-import { Badge, Kbd } from '../ui/misc'
+import { Kbd } from '../ui/misc'
 import { CommandPalette } from './CommandPalette'
-import { navGroups, SETTINGS_ITEM, type NavItem } from './nav'
+import { isActive, navItems, SETTINGS_ITEM, type NavItem } from './nav'
 
 export function Logo({ className }: { className?: string }) {
   return <img src="/logo.svg" alt="" className={cn('size-8 rounded-[9px]', className)} />
 }
 
 function NavRow({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
+  const { pathname } = useLocation()
   const Icon = item.icon
+  const active = isActive(item, pathname)
   return (
-    <NavLink
+    <Link
       to={item.to}
-      end={item.to === '/'}
       onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          'group flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
-          isActive ? 'bg-primary-soft font-medium text-primary-ink' : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
-        )
-      }
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'group flex h-10 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
+        active ? 'bg-primary-soft font-medium text-primary-ink' : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
+      )}
     >
       <Icon className="size-[18px] shrink-0" />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-      {item.soon && <span className="text-[10px] font-semibold tracking-wide text-fg-subtle uppercase">Soon</span>}
-    </NavLink>
+    </Link>
   )
 }
 
@@ -67,12 +69,7 @@ function CompanySwitcher() {
     <Menu
       className="w-full"
       trigger={({ toggle, open }) => (
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-surface-2"
-        >
+        <button type="button" onClick={toggle} aria-expanded={open} className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-surface-2">
           <Logo />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-fg">{company.name}</div>
@@ -130,25 +127,30 @@ function StorageStatus() {
   )
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
-  const company = useCompany()
-  const { mode } = usePrefs()
+function SidebarContent({ onNavigate, onCreate }: { onNavigate?: () => void; onCreate: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="p-3">
         <CompanySwitcher />
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 pb-3" aria-label="Main">
-        {navGroups(company, mode).map((group, i) => (
-          <div key={i} className="mb-4">
-            {group.label && <div className="px-3 pb-1.5 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">{group.label}</div>}
-            <div className="flex flex-col gap-0.5">
-              {group.items.map((item) => (
-                <NavRow key={item.to} item={item} onNavigate={onNavigate} />
-              ))}
-            </div>
-          </div>
-        ))}
+      <div className="px-3 pb-2">
+        <button
+          type="button"
+          onClick={() => {
+            onNavigate?.()
+            onCreate()
+          }}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-on-primary shadow-card hover:bg-primary-hover"
+        >
+          <Plus className="size-4" /> Create
+        </button>
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Main">
+        <div className="flex flex-col gap-0.5">
+          {navItems().map((item) => (
+            <NavRow key={item.to} item={item} onNavigate={onNavigate} />
+          ))}
+        </div>
       </nav>
       <div className="border-t border-line p-3">
         <NavRow item={SETTINGS_ITEM} onNavigate={onNavigate} />
@@ -173,77 +175,90 @@ function ThemeToggle() {
   )
 }
 
-function QuickCreateSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Everything you can create, grouped like the sections, one tap away. */
+function CreateSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const openQuick = useQuickEntry()
   const navigate = useNavigate()
   const { mode } = usePrefs()
-  const item = (icon: ReactNode, label: string, description: string, action: () => void, soon = false) => (
-    <button
-      type="button"
-      disabled={soon}
-      onClick={() => {
-        onClose()
-        action()
-      }}
-      className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3 text-left transition-colors hover:bg-surface-2 disabled:opacity-60"
-    >
-      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary-ink [&_svg]:size-5">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2 text-sm font-medium text-fg">
-          {label}
-          {soon && <Badge>Soon</Badge>}
-        </span>
-        <span className="block truncate text-xs text-fg-subtle">{description}</span>
-      </span>
-    </button>
-  )
+  const go = (to: string) => () => navigate(to)
+  const groups: { title: string; items: { icon: ReactNode; label: string; run: () => void }[] }[] = [
+    {
+      title: 'Sales',
+      items: [
+        { icon: <FileText />, label: 'Invoice', run: go('/sales/invoices/new') },
+        { icon: <ClipboardList />, label: 'Quote', run: go('/sales/quotes/new') },
+        { icon: <HandCoins />, label: 'Receive payment', run: go('/sales/payments/new') },
+      ],
+    },
+    {
+      title: 'Purchases',
+      items: [
+        { icon: <Receipt />, label: 'Expense', run: go('/purchases/expenses/new') },
+        { icon: <ShoppingCart />, label: 'Bill', run: go('/purchases/bills/new') },
+        { icon: <Banknote />, label: 'Pay a supplier', run: go('/purchases/payments/new') },
+      ],
+    },
+    {
+      title: 'Money',
+      items: [
+        { icon: <ArrowDownLeft />, label: 'Money in', run: () => openQuick('in') },
+        { icon: <ArrowUpRight />, label: 'Money out', run: () => openQuick('out') },
+        { icon: <ArrowLeftRight />, label: 'Transfer', run: () => openQuick('transfer') },
+        ...(mode === 'accountant' ? [{ icon: <NotebookPen />, label: 'Journal entry', run: go('/journal/new') }] : []),
+      ],
+    },
+  ]
   return (
-    <Dialog open={open} onClose={onClose} title="Create" size="sm">
-      <div className="grid grid-cols-1 gap-2">
-        {item(<ArrowDownLeft />, 'Money in', 'Sales, payments received, loans', () => openQuick('in'))}
-        {item(<ArrowUpRight />, 'Money out', 'Expenses, purchases, repayments', () => openQuick('out'))}
-        {item(<ArrowLeftRight />, 'Transfer', 'Between cash, bank and cards', () => openQuick('transfer'))}
-        {mode === 'accountant' && item(<NotebookPen />, 'Journal entry', 'Any debit and credit entry', () => navigate('/journal/new'))}
-        {item(<FilePlus2 />, 'Account', 'A new category or bank account', () => navigate('/accounts?new=1'))}
-        {item(<Receipt />, 'Invoice', 'Bill a customer and get paid', () => {}, true)}
+    <Dialog open={open} onClose={onClose} title="Create" size="md">
+      <div className="flex flex-col gap-5">
+        {groups.map((g) => (
+          <section key={g.title}>
+            <h3 className="mb-2 text-[11px] font-semibold tracking-wider text-fg-subtle uppercase">{g.title}</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {g.items.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => {
+                    onClose()
+                    item.run()
+                  }}
+                  className="flex flex-col items-center gap-2 rounded-xl border border-line bg-surface px-2 py-3 text-center text-xs font-medium text-fg transition-colors hover:bg-surface-2"
+                >
+                  <span className="grid size-10 place-items-center rounded-xl bg-primary-soft text-primary-ink [&_svg]:size-5">{item.icon}</span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </Dialog>
   )
 }
 
 function MobileNav({ onMore, onCreate }: { onMore: () => void; onCreate: () => void }) {
-  const { mode } = usePrefs()
   const tab = (to: string, label: string, icon: ReactNode) => (
     <NavLink
       to={to}
       end={to === '/'}
-      className={({ isActive }) =>
-        cn('flex flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[11px] font-medium [&_svg]:size-[22px]', isActive ? 'text-primary-ink' : 'text-fg-subtle')
-      }
+      className={({ isActive: active }) => cn('flex flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[11px] font-medium [&_svg]:size-[22px]', active ? 'text-primary-ink' : 'text-fg-subtle')}
     >
       {icon}
       {label}
     </NavLink>
   )
   return (
-    <nav
-      aria-label="Primary"
-      className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg lg:hidden"
-    >
+    <nav aria-label="Primary" className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg lg:hidden">
       <div className="mx-auto flex max-w-lg items-end">
         {tab('/', 'Home', <LayoutDashboard />)}
-        {tab('/journal', mode === 'simple' ? 'Activity' : 'Journal', <NotebookPen />)}
+        {tab('/sales', 'Sales', <Receipt />)}
         <div className="flex flex-1 justify-center">
-          <button
-            type="button"
-            onClick={onCreate}
-            aria-label="Create"
-            className="-mt-5 mb-1 grid size-14 place-items-center rounded-2xl bg-primary text-on-primary shadow-pop transition-transform active:scale-95"
-          >
+          <button type="button" onClick={onCreate} aria-label="Create" className="-mt-5 mb-1 grid size-14 place-items-center rounded-2xl bg-primary text-on-primary shadow-pop transition-transform active:scale-95">
             <Plus className="size-6" />
           </button>
         </div>
-        {tab('/reports', 'Reports', <BarChart3 />)}
+        {tab('/purchases', 'Purchases', <ShoppingCart />)}
         <button type="button" onClick={onMore} className="flex flex-1 flex-col items-center gap-1 pt-2 pb-1.5 text-[11px] font-medium text-fg-subtle [&_svg]:size-[22px]">
           <MenuIcon />
           More
@@ -281,7 +296,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh lg:pl-64">
       <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-surface lg:block">
-        <SidebarContent />
+        <SidebarContent onCreate={() => setCreateOpen(true)} />
       </aside>
 
       {drawerOpen && (
@@ -296,7 +311,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <X className="size-4" />
             </button>
-            <SidebarContent onNavigate={() => setDrawerOpen(false)} />
+            <SidebarContent onNavigate={() => setDrawerOpen(false)} onCreate={() => setCreateOpen(true)} />
           </div>
         </div>
       )}
@@ -329,7 +344,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="mx-auto max-w-6xl px-4 pt-6 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pt-8 lg:pb-16">{children}</main>
 
       <MobileNav onMore={() => setDrawerOpen(true)} onCreate={() => setCreateOpen(true)} />
-      <QuickCreateSheet open={createOpen} onClose={() => setCreateOpen(false)} />
+      <CreateSheet open={createOpen} onClose={() => setCreateOpen(false)} />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   )

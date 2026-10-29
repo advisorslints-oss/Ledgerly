@@ -24,6 +24,7 @@ import { setPrefs, usePrefs } from '../state/prefs'
 
 const TABS = [
   { id: 'business', label: 'Business' },
+  { id: 'documents', label: 'Invoices & quotes' },
   { id: 'preferences', label: 'Preferences' },
   { id: 'taxes', label: 'Taxes' },
   { id: 'lock', label: 'Lock books' },
@@ -58,6 +59,7 @@ export function Settings() {
       </div>
       <div className="max-w-3xl">
         {tab === 'business' && <BusinessTab />}
+        {tab === 'documents' && <DocumentsTab />}
         {tab === 'preferences' && <PreferencesTab />}
         {tab === 'taxes' && <TaxesTab />}
         {tab === 'lock' && <LockTab />}
@@ -181,6 +183,140 @@ function BusinessTab() {
         </div>
       </Section>
     </>
+  )
+}
+
+const ACCENTS = ['#4f46e5', '#0f766e', '#2563eb', '#b45309', '#be123c', '#7c3aed', '#111827']
+
+/** Reads an image and scales it down so the logo stays small inside the business record. */
+async function readLogo(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/png')
+}
+
+function DocumentsTab() {
+  const company = useCompany()
+  const toast = useToast()
+  const logoRef = useRef<HTMLInputElement>(null)
+  const current = company.documentSettings ?? {}
+  const [form, setForm] = useState(() => ({
+    logo: current.logo ?? '',
+    accent: current.accent ?? ACCENTS[0],
+    paymentTermsDays: current.paymentTermsDays ?? 14,
+    quoteValidityDays: current.quoteValidityDays ?? 14,
+    invoiceNotes: current.invoiceNotes ?? 'Thank you for your business.',
+    invoiceTerms: current.invoiceTerms ?? '',
+    bankDetails: current.bankDetails ?? '',
+  }))
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((s) => ({ ...s, [k]: v }))
+
+  const save = async () => {
+    try {
+      await updateCompany(db, company.id, { documentSettings: { ...form, logo: form.logo || undefined } })
+      toast('Invoice settings saved')
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    }
+  }
+
+  return (
+    <Section
+      title="How your invoices and quotes look"
+      description="Applied to every new document. You can still change notes on each one."
+      footer={
+        <Button variant="primary" onClick={save}>
+          Save changes
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="grid size-20 place-items-center overflow-hidden rounded-xl border border-dashed border-line-strong bg-surface-2">
+            {form.logo ? <img src={form.logo} alt="Logo" className="max-h-full max-w-full object-contain" /> : <span className="text-xs text-fg-subtle">No logo</span>}
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <Button size="sm" icon={<Upload />} onClick={() => logoRef.current?.click()}>
+                Upload logo
+              </Button>
+              {form.logo && (
+                <Button size="sm" variant="ghost" onClick={() => set('logo', '')}>
+                  Remove
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-fg-subtle">PNG or JPG. It's resized automatically.</p>
+          </div>
+          <input
+            ref={logoRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (!file) return
+              try {
+                set('logo', await readLogo(file))
+              } catch {
+                toast("That image couldn't be read.", 'error')
+              }
+            }}
+          />
+        </div>
+        <div>
+          <p className="mb-2 text-[13px] font-medium">Brand colour</p>
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Brand colour">
+            {ACCENTS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                role="radio"
+                aria-checked={form.accent === c}
+                aria-label={c}
+                onClick={() => set('accent', c)}
+                className={cn('size-9 rounded-full ring-offset-2 ring-offset-surface transition-shadow', form.accent === c && 'ring-2 ring-fg')}
+                style={{ background: c }}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Default payment terms">
+            {(id) => (
+              <Select id={id} value={form.paymentTermsDays} onChange={(e) => set('paymentTermsDays', Number(e.target.value))}>
+                {[0, 7, 14, 15, 30, 45, 60].map((d) => (
+                  <option key={d} value={d}>
+                    {d === 0 ? 'Due on receipt' : `${d} days`}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Quotes are valid for">
+            {(id) => (
+              <Select id={id} value={form.quoteValidityDays} onChange={(e) => set('quoteValidityDays', Number(e.target.value))}>
+                {[7, 14, 30, 60, 90].map((d) => (
+                  <option key={d} value={d}>
+                    {d} days
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        </div>
+        <Field label="How customers can pay you" hint="Bank account, UPI ID, payment link… shown on every invoice.">
+          {(id, d) => <Textarea id={id} aria-describedby={d} value={form.bankDetails} onChange={(e) => set('bankDetails', e.target.value)} rows={3} maxLength={500} placeholder={'Bank: …\nAccount number: …'} />}
+        </Field>
+        <Field label="Default note to customers">{(id) => <Textarea id={id} value={form.invoiceNotes} onChange={(e) => set('invoiceNotes', e.target.value)} rows={2} maxLength={1000} />}</Field>
+        <Field label="Default terms & conditions">{(id) => <Textarea id={id} value={form.invoiceTerms} onChange={(e) => set('invoiceTerms', e.target.value)} rows={3} maxLength={2000} />}</Field>
+      </div>
+    </Section>
   )
 }
 

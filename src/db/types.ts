@@ -53,6 +53,17 @@ export interface Features {
   projects: boolean
 }
 
+/** How invoices, quotes and other documents look and what they say by default. */
+export interface DocumentSettings {
+  logo?: string
+  accent?: string
+  paymentTermsDays?: number
+  quoteValidityDays?: number
+  invoiceNotes?: string
+  invoiceTerms?: string
+  bankDetails?: string
+}
+
 export interface Company {
   id: string
   name: string
@@ -70,7 +81,9 @@ export interface Company {
   /** Entries dated on or before this date can't be added, changed or reversed. */
   lockDate?: string
   features: Features
-  nextNumbers: { journal: number }
+  /** Next sequence number per series: journal, invoice, bill, payment_in… */
+  nextNumbers: { journal: number } & Record<string, number>
+  documentSettings?: DocumentSettings
   lastBackupAt?: number
   isDemo?: boolean
   createdAt: number
@@ -91,7 +104,7 @@ export interface Account {
   updatedAt: number
 }
 
-export type EntrySource = 'manual' | 'opening' | 'reversal'
+export type EntrySource = 'manual' | 'opening' | 'reversal' | 'document' | 'payment' | 'stock' | 'bank'
 
 export interface JournalEntry {
   id: string
@@ -104,6 +117,8 @@ export interface JournalEntry {
   status: 'posted' | 'reversed'
   reversalOfId?: string
   reversedById?: string
+  /** The invoice, bill, payment or other record this entry was generated from. */
+  docId?: string
   /** Sum of the debit side, in minor units. */
   total: number
   deviceId: string
@@ -121,6 +136,7 @@ export interface JournalLine {
   debit: number
   credit: number
   description?: string
+  contactId?: string
   order: number
 }
 
@@ -157,12 +173,201 @@ export interface AuditEvent {
   deviceId: string
 }
 
+export type ContactType = 'customer' | 'supplier' | 'both'
+
+export interface Contact {
+  id: string
+  companyId: string
+  type: ContactType
+  name: string
+  contactPerson?: string
+  email?: string
+  phone?: string
+  taxId?: string
+  address?: string
+  shippingAddress?: string
+  paymentTermsDays?: number
+  notes?: string
+  archived: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Item {
+  id: string
+  companyId: string
+  kind: 'product' | 'service'
+  name: string
+  sku?: string
+  unit?: string
+  description?: string
+  /** Price per unit in minor units. */
+  salePrice: number
+  purchasePrice: number
+  salesAccountId?: string
+  purchaseAccountId?: string
+  salesTaxRateId?: string
+  purchaseTaxRateId?: string
+  trackStock: boolean
+  inventoryAccountId?: string
+  reorderLevel?: number
+  archived: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export type DocType = 'invoice' | 'quote' | 'credit_note' | 'bill' | 'purchase_order' | 'supplier_credit' | 'expense'
+
+export type DocStatus = 'draft' | 'posted' | 'void' | 'sent' | 'accepted' | 'declined' | 'converted' | 'issued' | 'cancelled'
+
+export interface DocLine {
+  id: string
+  itemId?: string
+  description: string
+  quantity: number
+  /** Price per unit in minor units. */
+  rate: number
+  discountPct?: number
+  accountId: string
+  taxRateId?: string
+}
+
+export interface Allocation {
+  documentId: string
+  amount: number
+}
+
+/** An invoice, quote, credit note, bill, purchase order, supplier credit or expense. */
+export interface Doc {
+  id: string
+  companyId: string
+  type: DocType
+  number: string
+  contactId?: string
+  date: string
+  dueDate?: string
+  reference?: string
+  status: DocStatus
+  lines: DocLine[]
+  taxInclusive: boolean
+  subtotal: number
+  taxTotal: number
+  total: number
+  notes?: string
+  terms?: string
+  /** Expenses only: the cash, bank or card account the money came from. */
+  paidFromAccountId?: string
+  /** The journal entry this document posted, while it's posted. */
+  entryId?: string
+  convertedFromId?: string
+  convertedToId?: string
+  /** Credit notes and supplier credits: invoices or bills this credit has been applied to. */
+  allocations?: Allocation[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Payment {
+  id: string
+  companyId: string
+  direction: 'in' | 'out'
+  number: string
+  contactId: string
+  date: string
+  amount: number
+  /** Cash or bank account the money went into (in) or came out of (out). */
+  accountId: string
+  reference?: string
+  notes?: string
+  allocations: Allocation[]
+  status: 'posted' | 'void'
+  entryId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface StockMove {
+  id: string
+  companyId: string
+  itemId: string
+  date: string
+  /** Positive for stock in, negative for stock out. Up to 4 decimal places. */
+  quantity: number
+  /** Cost per unit in minor units, for display. */
+  unitCost: number
+  /** Signed value in minor units: exactly what was posted to the inventory account. */
+  value: number
+  sourceType: 'document' | 'adjustment'
+  sourceId: string
+  createdAt: number
+}
+
+export interface BankLine {
+  id: string
+  companyId: string
+  accountId: string
+  date: string
+  description: string
+  /** Signed: positive is money in, negative is money out. */
+  amount: number
+  reference?: string
+  status: 'new' | 'matched' | 'recorded' | 'ignored'
+  /** The journal line this statement line was matched to or recorded as. */
+  journalLineId?: string
+  importBatch: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface BankRule {
+  id: string
+  companyId: string
+  contains: string
+  direction: 'in' | 'out' | 'any'
+  accountId: string
+  contactId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Reconciliation {
+  id: string
+  companyId: string
+  accountId: string
+  statementDate: string
+  statementBalance: number
+  /** Journal lines ticked off against the statement. */
+  clearedLineIds: string[]
+  status: 'in_progress' | 'completed'
+  completedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface Attachment {
+  id: string
+  companyId: string
+  parentId: string
+  name: string
+  type: string
+  size: number
+  data: Blob
+  createdAt: number
+}
+
 /** Outbox of local writes, replayed to the sync server when the device is online. */
 export interface ChangeRecord {
   seq?: number
+  /** All changes from one save share a batch, so the server applies them together. */
+  batch: string
+  companyId: string
   table: string
   key: string
   op: 'put' | 'delete'
+  /** For updates of existing records: which fields changed. */
+  fields?: string[]
+  /** The record as it was right after this save. */
+  data?: unknown
   at: number
   deviceId: string
 }

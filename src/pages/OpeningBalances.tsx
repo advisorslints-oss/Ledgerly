@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, Info } from 'lucide-react'
+import { Info } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { ACCOUNT_TYPES, TYPE_LABELS } from '../accounting/accounts'
 import { isDebitNormal, setOpeningBalances } from '../accounting/engine'
 import { errorMessage } from '../accounting/errors'
@@ -97,15 +97,7 @@ export function OpeningBalances() {
 
   return (
     <div>
-      <PageHeader
-        back={
-          <Link to="/accounts" className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg">
-            <ArrowLeft className="size-4" /> Accounts
-          </Link>
-        }
-        title="Opening balances"
-        description="Moving from another system or starting mid-way? Enter what each account held on the day before you start using Ledgerly."
-      />
+      <PageHeader description="Moving from another system or starting mid-way? Enter what each account held on the day before you start using Ledgerly." />
 
       <Card className="mb-4 p-5">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end">

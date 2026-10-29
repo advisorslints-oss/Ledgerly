@@ -52,17 +52,18 @@ export function PageHeader({
   actions,
   back,
 }: {
-  title: ReactNode
+  /** Leave out inside a section with tabs, where the section already names the page. */
+  title?: ReactNode
   description?: ReactNode
   actions?: ReactNode
   back?: ReactNode
 }) {
   return (
-    <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <header className={cn('flex flex-col gap-4 sm:flex-row sm:justify-between', title ? 'mb-6 sm:items-end' : 'mb-4 sm:items-center')}>
       <div className="min-w-0">
         {back && <div className="mb-2 no-print">{back}</div>}
-        <h1 className="text-2xl font-semibold tracking-tight text-fg sm:text-[26px]">{title}</h1>
-        {description && <p className="mt-1 max-w-2xl text-sm text-fg-muted">{description}</p>}
+        {title && <h1 className="text-2xl font-semibold tracking-tight text-fg sm:text-[26px]">{title}</h1>}
+        {description && <p className={cn('max-w-2xl text-sm text-fg-muted', !!title && 'mt-1')}>{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2 no-print">{actions}</div>}
     </header>

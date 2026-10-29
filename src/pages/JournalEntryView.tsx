@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowLeft, Copy, Printer, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
+import { DOC_TYPES } from '../accounting/documents'
 import { reverseEntry } from '../accounting/engine'
 import { errorMessage } from '../accounting/errors'
 import { Button, LinkButton } from '../components/ui/button'
@@ -29,7 +30,14 @@ export function JournalEntryView() {
     const lines = await db.journalLines.where('entryId').equals(id).sortBy('order')
     const related = await db.journalEntries.bulkGet([entry.reversalOfId, entry.reversedById].filter((x): x is string => !!x))
     const audit = await db.audit.where('[companyId+at]').between([entry.companyId, 0], [entry.companyId, Infinity]).filter((a) => a.entityId === id).toArray()
-    return { entry, lines, related: related.filter((r) => !!r), audit }
+    const doc = entry.docId ? await db.documents.get(entry.docId) : undefined
+    const payment = entry.docId && !doc ? await db.payments.get(entry.docId) : undefined
+    const origin = doc
+      ? { label: `${DOC_TYPES[doc.type].label} ${doc.number}`, to: `${DOC_TYPES[doc.type].path}/${doc.id}` }
+      : payment
+        ? { label: `Payment ${payment.number}`, to: `${payment.direction === 'in' ? '/sales' : '/purchases'}/payments/${payment.id}` }
+        : undefined
+    return { entry, lines, related: related.filter((r) => !!r), audit, origin }
   }, [id])
 
   if (data === undefined || !accounts) return <Spinner />
@@ -41,7 +49,7 @@ export function JournalEntryView() {
     )
   }
 
-  const { entry, lines, related, audit } = data
+  const { entry, lines, related, audit, origin } = data
   const byId = new Map(accounts.map((a) => [a.id, a]))
   const original = related.find((r) => r!.id === entry.reversalOfId)
   const reversal = related.find((r) => r!.id === entry.reversedById)
@@ -73,7 +81,7 @@ export function JournalEntryView() {
                 Copy
               </LinkButton>
             )}
-            {canReverse && entry.source !== 'opening' && (
+            {canReverse && entry.source === 'manual' && (
               <Button icon={<Undo2 />} onClick={() => setReversing(true)}>
                 Reverse
               </Button>
@@ -82,6 +90,15 @@ export function JournalEntryView() {
         }
       />
 
+      {origin && (
+        <div className="mb-4 rounded-xl border border-line bg-primary-soft/50 px-4 py-3 text-sm text-fg-muted">
+          Created automatically from{' '}
+          <Link to={origin.to} className="font-medium text-primary-ink hover:underline">
+            {origin.label}
+          </Link>
+          . To change it, edit that instead.
+        </div>
+      )}
       {(original || reversal) && (
         <div className="mb-4 rounded-xl border border-line bg-surface-2/60 px-4 py-3 text-sm text-fg-muted">
           {original && (

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useQuickEntry } from '../components/QuickEntry'
 import { Button, LinkButton } from '../components/ui/button'
-import { Input } from '../components/ui/form'
+import { Input, Switch } from '../components/ui/form'
 import { Badge, Card, EmptyState, PageHeader, Spinner } from '../components/ui/misc'
 import { db } from '../db'
 import type { JournalEntry } from '../db/types'
@@ -22,6 +22,7 @@ export function Journal() {
   const openQuick = useQuickEntry()
   const [query, setQuery] = useState('')
   const [limit, setLimit] = useState(PAGE)
+  const [showCancelled, setShowCancelled] = useState(false)
   const accounts = useAccounts(company.id)
 
   const entries = useLiveQuery(
@@ -32,10 +33,13 @@ export function Journal() {
   const q = query.trim().toLowerCase()
   const filtered = useMemo(() => {
     if (!entries) return []
-    const sorted = [...entries].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)
+    // Edits and voids leave an entry plus its reversal; they cancel out, so they're hidden unless asked for.
+    const sorted = [...entries]
+      .filter((e) => showCancelled || (e.status !== 'reversed' && e.source !== 'reversal'))
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)
     if (!q) return sorted
     return sorted.filter((e) => e.number.toLowerCase().includes(q) || e.memo.toLowerCase().includes(q) || e.reference?.toLowerCase().includes(q) || f.toInput(e.total).startsWith(q))
-  }, [entries, q, f])
+  }, [entries, q, f, showCancelled])
   const visible = filtered.slice(0, limit)
 
   const lines = useLiveQuery(() => db.journalLines.where('entryId').anyOf(visible.map((e) => e.id)).toArray(), [visible.map((e) => e.id).join()])
@@ -60,8 +64,7 @@ export function Journal() {
   return (
     <div>
       <PageHeader
-        title={simple ? 'Transactions' : 'Journal'}
-        description={simple ? 'Everything you have recorded, newest first.' : 'All journal entries, newest first. Posted entries are never edited: reverse them instead.'}
+        description={simple ? 'Everything recorded in your books, newest first, including invoices, bills and payments.' : 'All journal entries, newest first. Posted entries are never edited: reverse them instead.'}
         actions={
           <>
             <Button icon={<ArrowUpRight />} onClick={() => openQuick('out')}>
@@ -77,9 +80,12 @@ export function Journal() {
         }
       />
 
-      <div className="relative mb-4 sm:w-80">
-        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" />
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by description, number or amount" aria-label="Search transactions" className="pl-9" />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative sm:w-80">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-subtle" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by description, number or amount" aria-label="Search transactions" className="pl-9" />
+        </div>
+        <Switch checked={showCancelled} onChange={setShowCancelled} label="Show cancelled entries" />
       </div>
 
       <Card className="overflow-hidden">

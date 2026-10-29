@@ -107,7 +107,7 @@ export async function createAccount(db: LedgerDB, companyId: string, input: Acco
     const at = Date.now()
     const account: Account = { id: newId(), companyId, ...clean, archived: false, createdAt: at, updatedAt: at }
     await db.accounts.add(account)
-    await db.track('accounts', account.id)
+    await db.track(companyId, 'accounts', account.id)
     await db.logAudit(companyId, 'create', 'account', account.id, `Created account ${account.code} ${account.name}`)
     return account
   })
@@ -135,7 +135,7 @@ export async function updateAccount(db: LedgerDB, id: string, input: AccountInpu
 
     const updated: Account = { ...current, ...clean, updatedAt: Date.now() }
     await db.accounts.put(updated)
-    await db.track('accounts', id)
+    await db.track(current.companyId, 'accounts', id, { fields: ['code', 'name', 'type', 'subtype', 'description', 'updatedAt'] })
     await db.logAudit(current.companyId, 'update', 'account', id, `Updated account ${updated.code} ${updated.name}`)
     return updated
   })
@@ -147,7 +147,7 @@ export async function setAccountArchived(db: LedgerDB, id: string, archived: boo
     if (!current) throw new AccountingError('Account not found.', 'not_found')
     if (archived && current.systemKey) throw new AccountingError("This account is used by the app and can't be archived.")
     await db.accounts.update(id, { archived, updatedAt: Date.now() })
-    await db.track('accounts', id)
+    await db.track(current.companyId, 'accounts', id, { fields: ['archived', 'updatedAt'] })
     await db.logAudit(
       current.companyId,
       archived ? 'archive' : 'restore',
@@ -172,9 +172,15 @@ export async function deleteAccount(db: LedgerDB, id: string): Promise<void> {
       .filter((t) => t.components.some((c) => c.salesAccountId === id || c.purchaseAccountId === id))
       .count()
     if (taxUse) throw new AccountingError('A tax rate uses this account. Change the tax rate first.', 'conflict')
+    const itemUse = await db.items
+      .where('companyId')
+      .equals(current.companyId)
+      .filter((i) => [i.salesAccountId, i.purchaseAccountId, i.inventoryAccountId].includes(id))
+      .count()
+    if (itemUse) throw new AccountingError('A product or service uses this account. Change it first.', 'conflict')
 
     await db.accounts.delete(id)
-    await db.track('accounts', id, 'delete')
+    await db.track(current.companyId, 'accounts', id, { op: 'delete' })
     await db.logAudit(current.companyId, 'delete', 'account', id, `Deleted account ${current.code} ${current.name}`)
   })
 }

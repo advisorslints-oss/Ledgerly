@@ -16,11 +16,13 @@ interface Props {
   accounts: Account[]
   account?: Account
   onSaved?: (account: Account) => void
+  /** Starting type for a new account, e.g. a bank account from the Banking section. */
+  defaults?: { type: AccountType; subtype: AccountSubtype }
 }
 
 const SINGULAR: Record<AccountType, string> = { asset: 'Asset', liability: 'Liability', equity: 'Equity', income: 'Income', expense: 'Expense' }
 
-export function AccountDialog({ open, onClose, accounts, account, onSaved }: Props) {
+export function AccountDialog({ open, onClose, accounts, account, onSaved, defaults }: Props) {
   const company = useCompany()
   const { mode } = usePrefs()
   const toast = useToast()
@@ -37,10 +39,10 @@ export function AccountDialog({ open, onClose, accounts, account, onSaved }: Pro
     if (!open) return
     setError(null)
     setCodeTouched(!!account)
-    setType(account?.type ?? 'expense')
-    setSubtype(account?.subtype ?? 'operating_expense')
+    setType(account?.type ?? defaults?.type ?? 'expense')
+    setSubtype(account?.subtype ?? defaults?.subtype ?? 'operating_expense')
     setName(account?.name ?? '')
-    setCode(account?.code ?? suggestCode(accounts, 'operating_expense'))
+    setCode(account?.code ?? suggestCode(accounts, defaults?.subtype ?? 'operating_expense'))
     setDescription(account?.description ?? '')
     // Reset only when the dialog opens or switches account, not on every accounts update.
   }, [open, account?.id])

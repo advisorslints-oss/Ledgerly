@@ -1,10 +1,10 @@
-import { ArrowRight, BookOpen, Lock, Plus, Search, Scale } from 'lucide-react'
+import { ArrowRight, BookOpen, Lock, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { ACCOUNT_TYPES, subtypeInfo, TYPE_HELP, TYPE_LABELS } from '../accounting/accounts'
 import { naturalBalance, totalsByAccount } from '../accounting/reports'
 import { AccountDialog } from '../components/AccountDialog'
-import { Button, LinkButton } from '../components/ui/button'
+import { Button } from '../components/ui/button'
 import { Input, Switch } from '../components/ui/form'
 import { Badge, Card, EmptyState, Help, PageHeader, Segmented, Spinner } from '../components/ui/misc'
 import type { AccountType } from '../db/types'
@@ -19,6 +19,7 @@ export function Accounts() {
   const f = useFormat()
   const { mode } = usePrefs()
   const navigate = useNavigate()
+  const showCodes = mode === 'accountant'
   const [params, setParams] = useSearchParams()
   const accounts = useAccounts(company.id)
   const lines = useLines(company.id, undefined, today())
@@ -26,7 +27,6 @@ export function Accounts() {
   const [filter, setFilter] = useState<'all' | AccountType>('all')
   const [showArchived, setShowArchived] = useState(false)
   const creating = params.get('new') === '1'
-  const showCodes = mode === 'accountant'
 
   const balances = useMemo(() => totalsByAccount(lines ?? []), [lines])
 
@@ -50,17 +50,11 @@ export function Accounts() {
   return (
     <div>
       <PageHeader
-        title={showCodes ? 'Chart of accounts' : 'Accounts'}
         description="Every amount you record lands in one of these. Click an account to see its history."
         actions={
-          <>
-            <LinkButton to="/accounts/opening-balances" icon={<Scale />}>
-              Opening balances
-            </LinkButton>
-            <Button variant="primary" icon={<Plus />} onClick={() => setParams({ new: '1' })}>
-              New account
-            </Button>
-          </>
+          <Button variant="primary" icon={<Plus />} onClick={() => setParams({ new: '1' })}>
+            New account
+          </Button>
         }
       />
 

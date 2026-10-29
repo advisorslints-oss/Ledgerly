@@ -88,5 +88,14 @@ describe('demo company', () => {
 
     const cash = tb.rows.find((r) => r.account.code === '1000')
     expect(cash ? cash.debit : 0).toBeGreaterThanOrEqual(0)
+    const bank = tb.rows.find((r) => r.account.code === '1010')!
+    expect(bank.debit).toBeGreaterThan(0)
+
+    // Documents, stock and the statement review queue are all populated.
+    expect(await db.documents.where('companyId').equals(company.id).count()).toBeGreaterThan(20)
+    expect(await db.bankLines.count()).toBeGreaterThan(0)
+    const inventory = tb.rows.find((r) => r.account.code === '1200')
+    const stockValue = (await db.stockMoves.toArray()).reduce((s, m) => s + m.value, 0)
+    expect(inventory ? inventory.debit - inventory.credit : 0).toBe(stockValue)
   })
 })
