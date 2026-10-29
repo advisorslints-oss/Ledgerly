@@ -352,6 +352,8 @@ export interface Attachment {
   type: string
   size: number
   data: Blob
+  /** Synced from another device but the file itself hasn't downloaded yet. */
+  missing?: boolean
   createdAt: number
 }
 

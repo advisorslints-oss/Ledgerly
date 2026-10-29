@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, BookCheck, Check, CloudOff, Laptop, Lock, Smartphone, Sparkles } from 'lucide-react'
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
 import { createCompany } from '../accounting/company'
 import { COUNTRIES, detectCountry, getCountry } from '../accounting/countries'
 import { createDemoCompany } from '../accounting/demo'
@@ -45,6 +45,9 @@ export function Onboarding({ companies }: { companies: Company[] }) {
   const [error, setError] = useState<string | null>(null)
 
   const chartSize = buildChart(industry, country.taxAccounts, features).length
+  // Arrived here because there were no businesses (e.g. one was deleted on another device), and now there are.
+  if (companies.length > 0 && params.get('new') !== '1' && busy === null) return <Navigate to="/" replace />
+
 
   const changeCountry = (code: string) => {
     const c = getCountry(code)
@@ -158,6 +161,12 @@ export function Onboarding({ companies }: { companies: Company[] }) {
                   {busy === 'demo' ? 'Loading demo…' : 'Explore a demo company'}
                 </Button>
               </div>
+              <p className="mt-6 text-sm text-fg-muted">
+                Already use Ledgerly on another device?{' '}
+                <Link to="/sign-in" className="font-medium text-primary-ink hover:underline">
+                  Sign in to get your books
+                </Link>
+              </p>
               {error && <p className="mt-4 text-sm text-danger">{error}</p>}
             </div>
           )}

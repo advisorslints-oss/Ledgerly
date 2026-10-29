@@ -3,7 +3,12 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// In development the sync server runs separately (npm run server); the app reaches it through /api.
+const api = { '/api': 'http://localhost:8787' }
+
 export default defineConfig({
+  server: { proxy: api },
+  preview: { proxy: api },
   plugins: [
     react(),
     tailwindcss(),
@@ -31,6 +36,8 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: '/index.html',
+        // Sync calls must always reach the server, never an offline copy.
+        navigateFallbackDenylist: [/^\/api\//],
       },
     }),
   ],

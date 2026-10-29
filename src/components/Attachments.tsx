@@ -75,6 +75,14 @@ function FileTile({ file, onRemove }: { file: Attachment; onRemove?: () => void 
   const url = useMemo(() => URL.createObjectURL(file.data), [file.data])
   useEffect(() => () => URL.revokeObjectURL(url), [url])
   const image = file.type.startsWith('image/')
+  if (file.missing) {
+    return (
+      <div title={file.name} className="flex size-24 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-line-strong bg-surface-2 p-2 text-center">
+        <FileText className="size-5 text-fg-subtle" />
+        <span className="text-[11px] text-fg-subtle">Downloads on next sync</span>
+      </div>
+    )
+  }
   return (
     <div className="group relative">
       <a href={url} target="_blank" rel="noreferrer" title={file.name} className="block size-24 overflow-hidden rounded-xl border border-line bg-surface-2">

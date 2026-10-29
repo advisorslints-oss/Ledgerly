@@ -6,8 +6,13 @@ import {
   Banknote,
   Check,
   ChevronsUpDown,
+  CircleAlert,
   ClipboardList,
+  Cloud,
+  CloudCheck,
   CloudOff,
+  Eye,
+  RefreshCw,
   FileText,
   HandCoins,
   LayoutDashboard,
@@ -28,8 +33,10 @@ import { db } from '../../db'
 import type { Company } from '../../db/types'
 import { cn } from '../../lib/cn'
 import { useOnline } from '../../lib/platform'
+import { relativeTime } from '../../lib/time'
 import { useCompany } from '../../state/company'
 import { setPrefs, usePrefs } from '../../state/prefs'
+import { useSyncState } from '../../sync/controller'
 import { useQuickEntry } from '../QuickEntry'
 import { Dialog } from '../ui/dialog'
 import { Menu, MenuItem } from '../ui/menu'
@@ -114,16 +121,42 @@ function CompanySwitcher() {
   )
 }
 
-function StorageStatus() {
+/** What sync is doing right now for the open business, in a few words. */
+function useSyncSummary() {
+  const s = useSyncState()
   const online = useOnline()
+  const company = useCompany()
+  const pending = useLiveQuery(() => db.changes.where('companyId').equals(company.id).count(), [company.id]) ?? 0
+  const waiting = pending ? `${pending} change${pending > 1 ? 's' : ''} waiting` : ''
+  if (!s.meta.session) return { icon: online ? ShieldCheck : CloudOff, tone: online ? 'text-success' : 'text-warning', title: online ? 'Works offline' : 'You are offline', text: 'Sign in to sync devices', to: '/sign-in' }
+  if (!s.meta.synced.includes(company.id)) return { icon: Cloud, tone: 'text-fg-subtle', title: 'Not syncing', text: 'Only on this device', to: '/settings?tab=account' }
+  if (s.status === 'syncing') return { icon: RefreshCw, tone: 'text-primary-ink animate-spin', title: 'Syncing…', text: waiting || 'Up to date soon', to: '/settings?tab=account' }
+  if (s.status === 'offline' || !online) return { icon: CloudOff, tone: 'text-warning', title: 'Offline', text: waiting ? `${waiting}, will sync later` : 'Saved on this device', to: '/settings?tab=account' }
+  if (s.status === 'error') return { icon: CircleAlert, tone: 'text-danger', title: 'Sync problem', text: 'Tap to see what happened', to: '/settings?tab=account' }
+  return { icon: CloudCheck, tone: 'text-success', title: 'Synced', text: waiting || (s.meta.lastSyncedAt ? relativeTime(s.meta.lastSyncedAt, company.locale) : 'Up to date'), to: '/settings?tab=account' }
+}
+
+function SyncStatus() {
+  const s = useSyncSummary()
+  const Icon = s.icon
   return (
-    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-fg-subtle" title="Everything is saved in this browser and works without internet.">
-      {online ? <ShieldCheck className="size-4 text-success" /> : <CloudOff className="size-4 text-warning" />}
-      <span className="leading-tight">
-        <span className="block font-medium text-fg-muted">{online ? 'Works offline' : 'You are offline'}</span>
-        Saved on this device
+    <Link to={s.to} className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs text-fg-subtle hover:bg-surface-2">
+      <Icon className={cn('size-4 shrink-0', s.tone)} />
+      <span className="min-w-0 leading-tight">
+        <span className="block font-medium text-fg-muted">{s.title}</span>
+        <span className="block truncate">{s.text}</span>
       </span>
-    </div>
+    </Link>
+  )
+}
+
+function SyncButton() {
+  const s = useSyncSummary()
+  const Icon = s.icon
+  return (
+    <Link to={s.to} aria-label={`${s.title}. ${s.text}`} title={`${s.title} · ${s.text}`} className="grid size-9 place-items-center rounded-lg text-fg-muted hover:bg-surface-2 hover:text-fg lg:hidden">
+      <Icon className={cn('size-[18px]', s.tone)} />
+    </Link>
   )
 }
 
@@ -154,7 +187,7 @@ function SidebarContent({ onNavigate, onCreate }: { onNavigate?: () => void; onC
       </nav>
       <div className="border-t border-line p-3">
         <NavRow item={SETTINGS_ITEM} onNavigate={onNavigate} />
-        <StorageStatus />
+        <SyncStatus />
       </div>
     </div>
   )
@@ -274,6 +307,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [createOpen, setCreateOpen] = useState(false)
   const company = useCompany()
   const location = useLocation()
+  const sync = useSyncState()
+  const viewOnly = sync.meta.roles[company.id] === 'viewer' && sync.meta.synced.includes(company.id)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -336,12 +371,20 @@ export function AppShell({ children }: { children: ReactNode }) {
             </span>
           </button>
           <div className="flex items-center gap-1 lg:ml-auto">
+            <SyncButton />
             <ThemeToggle />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 pt-6 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pt-8 lg:pb-16">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 pt-6 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pt-8 lg:pb-16">
+        {viewOnly && (
+          <div className="no-print mb-5 flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm text-fg-muted">
+            <Eye className="size-4 shrink-0" /> You have view-only access to {company.name}. Ask the owner for editor access to make changes.
+          </div>
+        )}
+        {children}
+      </main>
 
       <MobileNav onMore={() => setDrawerOpen(true)} onCreate={() => setCreateOpen(true)} />
       <CreateSheet open={createOpen} onClose={() => setCreateOpen(false)} />

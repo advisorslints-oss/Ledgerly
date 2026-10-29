@@ -209,6 +209,7 @@ describe('purchases and stock', () => {
     const { db, company, byCode } = await setup()
     const exp = await saveDocument(db, company.id, { type: 'expense', date: '2026-05-01', lines: [line(byCode('6070'), 1, 4_500)], taxInclusive: false, paidFromAccountId: byCode('1010') }, { post: true })
     expect(exp.number).toBe('EXP-0001')
+    expect(docState(exp, 0)).toBe('paid')
     const bal = await balances(db, company.id)
     expect(bal('1010')).toBe(-4_500)
     expect(bal('6070')).toBe(4_500)

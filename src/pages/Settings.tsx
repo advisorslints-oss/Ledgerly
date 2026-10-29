@@ -21,9 +21,13 @@ import { downloadFile, requestPersistentStorage, toCSV, useInstall } from '../li
 import { useCompany, useFormat } from '../state/company'
 import { useAccounts } from '../state/data'
 import { setPrefs, usePrefs } from '../state/prefs'
+import { removeFromDevice, useSyncState } from '../sync/controller'
+import { AccountTab, TeamTab } from './SyncSettings'
 
 const TABS = [
   { id: 'business', label: 'Business' },
+  { id: 'account', label: 'Account & sync' },
+  { id: 'team', label: 'Team' },
   { id: 'documents', label: 'Invoices & quotes' },
   { id: 'preferences', label: 'Preferences' },
   { id: 'taxes', label: 'Taxes' },
@@ -59,6 +63,8 @@ export function Settings() {
       </div>
       <div className="max-w-3xl">
         {tab === 'business' && <BusinessTab />}
+        {tab === 'account' && <AccountTab />}
+        {tab === 'team' && <TeamTab />}
         {tab === 'documents' && <DocumentsTab />}
         {tab === 'preferences' && <PreferencesTab />}
         {tab === 'taxes' && <TaxesTab />}
@@ -640,6 +646,7 @@ function DataTab() {
   const toast = useToast()
   const navigate = useNavigate()
   const fileRef = useRef<HTMLInputElement>(null)
+  const sync = useSyncState()
   const [pending, setPending] = useState<BackupFile | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [confirmName, setConfirmName] = useState('')
@@ -673,7 +680,12 @@ function DataTab() {
 
   const pickFile = async (file: File) => {
     try {
-      setPending(parseBackup(await file.text()))
+      const backup = parseBackup(await file.text())
+      // Restoring an old copy over shared books would roll back everyone's work.
+      if (sync.meta.synced.includes(backup.company.id)) {
+        return toast('This business syncs with your account. Remove it from this device in Account & sync first, or restore it on a device where it isn’t synced.', 'error')
+      }
+      setPending(backup)
     } catch (err) {
       toast(errorMessage(err), 'error')
     }
@@ -693,7 +705,9 @@ function DataTab() {
   }
 
   const remove = async () => {
-    await deleteCompany(db, company.id)
+    // A synced business is only taken off this device; deleting it from the account is in Account & sync.
+    if (sync.meta.synced.includes(company.id)) await removeFromDevice(company.id)
+    else await deleteCompany(db, company.id)
     setPrefs({ companyId: undefined })
     toast(`${company.name} was deleted from this device`)
     navigate('/', { replace: true })
@@ -764,7 +778,11 @@ function DataTab() {
         onConfirm={remove}
         danger
         title={`Delete ${company.name}?`}
-        description="This erases every account and transaction for this business on this device. Download a backup first if you might need it."
+        description={
+          sync.meta.synced.includes(company.id)
+            ? 'This removes it from this device only. It stays in your account and on your other devices.'
+            : 'This erases every account and transaction for this business on this device. Download a backup first if you might need it.'
+        }
         confirmLabel="Delete forever"
         confirmDisabled={confirmName.trim() !== company.name}
       >

@@ -1,7 +1,23 @@
 // Wire format shared by the app and the sync server. Keep this file free of imports so the
 // server can load it directly.
 
-export const SYNC_TABLES = ['companies', 'accounts', 'journalEntries', 'journalLines', 'taxRates', 'audit'] as const
+export const SYNC_TABLES = [
+  'companies',
+  'accounts',
+  'journalEntries',
+  'journalLines',
+  'taxRates',
+  'audit',
+  'contacts',
+  'items',
+  'documents',
+  'payments',
+  'stockMoves',
+  'bankLines',
+  'bankRules',
+  'reconciliations',
+  'attachments',
+] as const
 export type SyncTable = (typeof SYNC_TABLES)[number]
 
 export type Role = 'owner' | 'editor' | 'viewer'

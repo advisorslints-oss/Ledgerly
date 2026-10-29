@@ -31,6 +31,7 @@ import { ReportsHome } from './pages/reports/ReportsHome'
 import { TrialBalanceReport } from './pages/reports/TrialBalance'
 import { AccountingLayout, BankingLayout, ItemsLayout, PurchasesLayout, SalesLayout } from './pages/sections'
 import { Settings } from './pages/Settings'
+import { SignIn } from './pages/SignIn'
 import { CompanyProvider } from './state/company'
 import { usePrefs } from './state/prefs'
 
@@ -59,6 +60,7 @@ export function App() {
         ) : (
           <Routes>
             <Route path="/welcome" element={<Onboarding companies={companies} />} />
+            <Route path="/sign-in" element={<SignIn />} />
             <Route element={<Shell companies={companies} />}>
               <Route index element={<Dashboard />} />
 

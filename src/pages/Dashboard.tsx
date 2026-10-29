@@ -35,6 +35,7 @@ import { isStandalone } from '../lib/platform'
 import { useCompany, useFormat } from '../state/company'
 import { useAccounts, useContacts, useItems, useLedgerDocs, useLines, useStockMoves } from '../state/data'
 import { setPrefs, usePrefs } from '../state/prefs'
+import { useSyncState } from '../sync/controller'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -366,6 +367,8 @@ function RecentList({ entries }: { entries: JournalEntry[] }) {
 function HealthCheck({ balanced, negativeMoney, hasEntries, oldestEntry }: { balanced: boolean; negativeMoney: string[]; hasEntries: boolean; oldestEntry: string }) {
   const company = useCompany()
   const f = useFormat()
+  const sync = useSyncState()
+  const synced = !!sync.meta.session && sync.meta.synced.includes(company.id)
   const daysSinceBackup = company.lastBackupAt ? Math.floor((Date.now() - company.lastBackupAt) / 86_400_000) : null
   const fyStart = fiscalYearStart(today(), company.fiscalYearStartMonth)
 
@@ -375,7 +378,9 @@ function HealthCheck({ balanced, negativeMoney, hasEntries, oldestEntry }: { bal
       : { tone: 'warn', title: 'Books are out of balance', text: 'Open the trial balance to investigate.', to: '/reports/trial-balance' },
   ]
   if (negativeMoney.length) items.push({ tone: 'warn', title: 'Negative balance', text: `${negativeMoney.join(', ')} is below zero. A deposit may be missing.` })
-  if (hasEntries) {
+  if (synced) {
+    items.push({ tone: 'good', title: 'Synced to your account', text: 'A copy is kept safe on the server and on your other devices.', to: '/settings?tab=account' })
+  } else if (hasEntries) {
     if (daysSinceBackup === null || daysSinceBackup > 7) {
       items.push({
         tone: 'warn',
@@ -427,13 +432,15 @@ function HealthCheck({ balanced, negativeMoney, hasEntries, oldestEntry }: { bal
 function GettingStarted({ hasOpening, hasInvoice }: { hasOpening: boolean; hasInvoice: boolean }) {
   const company = useCompany()
   const prefs = usePrefs()
+  const sync = useSyncState()
+  const synced = sync.meta.synced.includes(company.id)
   if (prefs.dismissedChecklist?.includes(company.id)) return null
 
   const steps = [
     { done: true, title: 'Create your books', action: null },
     { done: hasOpening, title: 'Enter opening balances', action: <LinkButton to="/accounts/opening-balances" size="sm" variant="soft">Start</LinkButton> },
     { done: hasInvoice, title: 'Send your first invoice', action: <LinkButton to="/sales/invoices/new" size="sm" variant="soft">Create</LinkButton> },
-    { done: !!company.lastBackupAt, title: 'Download a backup', action: <LinkButton to="/settings?tab=data" size="sm" variant="soft" icon={<Download />}>Backup</LinkButton> },
+    { done: !!company.lastBackupAt || synced, title: synced ? 'Synced to your account' : 'Back up or sign in to sync', action: <LinkButton to="/settings?tab=account" size="sm" variant="soft" icon={<Download />}>Set up</LinkButton> },
     { done: isStandalone(), title: 'Install the app', action: <LinkButton to="/settings?tab=preferences" size="sm" variant="soft">How</LinkButton> },
   ]
   const doneCount = steps.filter((s) => s.done).length

@@ -56,6 +56,16 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS records_line_account
     ON records (company_id, json_extract(data, '$.accountId')) WHERE tbl = 'journalLines';
 
+  -- Attachment contents (receipt photos, PDFs). Their metadata syncs as ordinary records.
+  CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
   INSERT OR IGNORE INTO counters (name, value) VALUES ('seq', 0);
 `

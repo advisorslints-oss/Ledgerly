@@ -480,6 +480,8 @@ export function docState(doc: Doc, settled: number, asOf = today()): DocState {
     return doc.status
   }
   if (doc.status !== 'posted') return doc.status
+  // An expense is money already spent from a cash, bank or card account.
+  if (doc.type === 'expense') return 'paid'
   if (info.credit) {
     const used = (doc.allocations ?? []).reduce((s, a) => s + a.amount, 0)
     return used >= doc.total ? 'applied' : 'open'

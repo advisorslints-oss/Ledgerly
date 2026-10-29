@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable, type Transaction } from 'dexie'
+import { AccountingError } from '../accounting/errors'
 import { getDeviceId, newId } from '../lib/id'
 import type {
   Account,
@@ -60,6 +61,8 @@ export class LedgerDB extends Dexie {
   meta!: EntityTable<MetaRecord, 'key'>
 
   readonly deviceId: string
+  /** Businesses this person can only view (a viewer on a shared business). Saves to them are refused. */
+  readOnlyCompanies = new Set<string>()
   private writeListeners = new Set<() => void>()
 
   constructor(name = 'ledgerly', deviceId?: string) {
@@ -117,6 +120,8 @@ export class LedgerDB extends Dexie {
 
   /** Records changed rows in the outbox. Must run inside `write`, after the rows are saved. */
   async track(companyId: string, table: string, keys: string | string[], opts: { op?: 'put' | 'delete'; fields?: string[] } = {}): Promise<void> {
+    // Every save passes through here, so this is the one place view-only access is enforced on the device.
+    if (this.readOnlyCompanies.has(companyId)) throw new AccountingError('You have view-only access to this business.', 'conflict')
     const op = opts.op ?? 'put'
     const list = Array.isArray(keys) ? keys : [keys]
     if (!list.length) return

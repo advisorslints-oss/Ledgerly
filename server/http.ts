@@ -85,6 +85,24 @@ export function readJson(req: IncomingMessage): Promise<unknown> {
   })
 }
 
+export function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(new HttpError(413, 'Files can be up to 10 MB.'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+}
+
 export function setCors(res: ServerResponse): void {
   // Auth uses a bearer token, never cookies, so allowing any origin doesn't expose sessions.
   res.setHeader('Access-Control-Allow-Origin', '*')
