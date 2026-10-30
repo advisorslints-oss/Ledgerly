@@ -63,6 +63,19 @@ export interface DocumentSettings {
   invoiceTerms?: string
   bankDetails?: string
   reminders?: ReminderSettings
+  payments?: PaymentSettings
+}
+
+/** How customers can pay online. Links are built per invoice, so the amount and number are filled in. */
+export interface PaymentSettings {
+  /** UPI ID (India), e.g. shop@okhdfc. */
+  upiId?: string
+  /** Name shown in the customer's UPI app. Defaults to the business name. */
+  upiName?: string
+  /** A payment page link. {amount}, {currency} and {number} are filled in for each invoice. */
+  link?: string
+  /** Print a QR code on invoices. */
+  showQr?: boolean
 }
 
 export type ReminderTone = 'gentle' | 'firm' | 'final'

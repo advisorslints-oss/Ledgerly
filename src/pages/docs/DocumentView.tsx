@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, Ban, BellRing, CalendarSync, Check, Copy, CreditCard, Mail, MessageCircle, MoreHorizontal, Pencil, Printer, Repeat, Send, Share2, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Ban, BellRing, CalendarSync, Check, Copy, CreditCard, Link2, Mail, MessageCircle, MoreHorizontal, Pencil, Printer, Repeat, Send, Share2, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { getCountry } from '../../accounting/countries'
@@ -30,7 +30,9 @@ import type { Allocation, Contact, Doc, DocType } from '../../db/types'
 import { fromISODate, toISODate, today } from '../../lib/dates'
 import { useCompany, useFormat } from '../../state/company'
 import { useLedgerDocs, useTaxRates } from '../../state/data'
+import { howToPay, payOptions } from '../../accounting/paylinks'
 import { daysOverdue as daysPast, reachedStage, reminderSettings } from '../../accounting/reminders'
+import { QrCode } from '../../components/QrCode'
 import { recurringPath, Totals } from './DocumentForm'
 import { ReminderDialog } from './Reminders'
 
@@ -384,6 +386,9 @@ export function Paper({ doc, contact, totals, paid }: { doc: Doc; contact?: Cont
   const title = doc.type === 'invoice' && showTax && company.taxId ? 'Tax invoice' : doc.type === 'expense' ? 'Expense' : info.label
   const hasDiscount = doc.lines.some((l) => l.discountPct)
   const lineTotals = new Map(totals.lines.map((l) => [l.lineId, l]))
+  // Drafts show it too, so the printed invoice is ready to send once approved.
+  const due = totals.total - paid
+  const pay = payOptions(company, doc, due)
 
   return (
     <article className="paper mx-auto w-full max-w-[860px] overflow-hidden rounded-2xl border border-line bg-white text-[13px] text-gray-800 shadow-card print:max-w-none print:rounded-none print:border-0 print:shadow-none">
@@ -484,6 +489,25 @@ export function Paper({ doc, contact, totals, paid }: { doc: Doc; contact?: Cont
         </div>
         {doc.taxInclusive && showTax && <p className="mt-2 text-right text-xs text-gray-500">Prices include {company.taxName}.</p>}
 
+        {pay && (
+          <section className="mt-8 flex flex-col gap-4 rounded-xl border border-gray-200 p-4 sm:flex-row sm:items-center print:break-inside-avoid">
+            {pay.showQr && <QrCode value={pay.upi?.url ?? pay.link!} size={112} label={pay.upi ? 'UPI payment QR code' : 'Payment link QR code'} className="shrink-0" />}
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold tracking-wider text-gray-500 uppercase">Pay online</p>
+              <p className="mt-1 text-gray-700">
+                {pay.upi ? `Scan with any UPI app to pay ${f.money(due)}${pay.link ? ', or use the link below' : ''}.` : `Scan the code or use the link to pay ${f.money(due)}.`}
+              </p>
+              {pay.upi && <p className="mt-1 text-gray-600">UPI ID: <span className="font-medium text-gray-900">{pay.upi.id}</span></p>}
+              {pay.link && (
+                <a href={pay.link} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block font-medium break-all" style={{ color: accent }}>
+                  <span className="print:hidden">Pay {f.money(due)} online →</span>
+                  <span className="hidden print:inline">{pay.link}</span>
+                </a>
+              )}
+            </div>
+          </section>
+        )}
+
         {(doc.notes || doc.terms || (info.side === 'sales' && settings.bankDetails)) && (
           <section className="mt-8 grid grid-cols-1 gap-6 border-t border-gray-200 pt-6 sm:grid-cols-2">
             {doc.notes && (
@@ -517,7 +541,8 @@ function ShareMenu({ doc, contact, due, onRemind }: { doc: Doc; contact?: Contac
   const toast = useToast()
   const info = DOC_TYPES[doc.type]
   if (info.side !== 'sales' && doc.type !== 'purchase_order') return null
-  const bank = company.documentSettings?.bankDetails
+  const bank = doc.status === 'posted' || doc.status === 'draft' ? howToPay(company, doc, due) : ''
+  const payLink = payOptions(company, doc, due)?.link
   const text = [
     `Hello${contact ? ` ${contact.contactPerson ?? contact.name}` : ''},`,
     '',
@@ -568,6 +593,22 @@ function ShareMenu({ doc, contact, due, onRemind }: { doc: Doc; contact?: Contac
           <MenuItem icon={<Printer />} onClick={() => (close(), window.print())}>
             Save as PDF
           </MenuItem>
+          {payLink && (
+            <MenuItem
+              icon={<Link2 />}
+              onClick={async () => {
+                close()
+                try {
+                  await navigator.clipboard.writeText(payLink)
+                  toast('Payment link copied')
+                } catch {
+                  toast("Couldn't copy on this device", 'error')
+                }
+              }}
+            >
+              Copy payment link
+            </MenuItem>
+          )}
           {onRemind && (
             <MenuItem icon={<BellRing />} onClick={() => (close(), onRemind())}>
               Send payment reminder

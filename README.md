@@ -67,6 +67,7 @@ Highlights:
 - **Printable documents** with your logo and colour; share by WhatsApp or email, or save as PDF.
 - **Receipts and files** attached to any document, including photos from a phone camera.
 - **Recurring invoices, bills and expenses**: weekly, monthly, quarterly or yearly, ending never, on a date or after a number of times, approved automatically or saved as drafts. Dates missed while the app was closed are caught up; each occurrence has a fixed id, so two devices can't create it twice. For a synced business, a device only creates them right after it has caught up with the server.
+- **Online payment links**: add your UPI ID (India) and/or a payment page link from Stripe, Razorpay, PayPal and the like, with `{amount}`, `{currency}` and `{number}` filled in per invoice. Invoices show a scannable QR code and a pay button, and shared messages and reminders include the link. Money goes straight to you.
 - **Payment reminders**: unpaid invoices show up under Sales → Reminders at the stages you choose (before due, on the day, a week late…), with a friendly, firm or final message to send from your own WhatsApp or email. Each one sent is logged on the invoice.
 - **Simple and accountant modes**, a command bar (Ctrl/⌘+K), dark mode, 12 industry templates and 18 country tax presets.
 
@@ -84,6 +85,6 @@ tests/            End-to-end tests with two devices syncing through a real serve
 
 ## Roadmap
 
-1. **Online payment links**, and sending reminders automatically by email from the server.
+1. **Payments marked as paid automatically** (Stripe/Razorpay webhooks through the sync server), and sending reminders by email from the server.
 2. **Budgets, fixed assets with depreciation, projects and job costing.**
 3. **Multi-currency**, password reset by email, native desktop (Tauri) and store apps (Capacitor), AI receipt reading.

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { DOC_TYPES } from '../../accounting/documents'
 import { errorMessage } from '../../accounting/errors'
+import { howToPay } from '../../accounting/paylinks'
 import { daysOverdue, dueReminders, logReminder, reminderSettings, renderReminder, stageLabel, undoReminder, type DueReminder } from '../../accounting/reminders'
 import { Button, LinkButton } from '../../components/ui/button'
 import { Dialog } from '../../components/ui/dialog'
@@ -197,7 +198,7 @@ export function ReminderDialog({ doc, due, stageIndex, tone: initialTone, daysOv
     dueDate: doc.dueDate ? f.date(doc.dueDate) : '',
     daysOverdue,
     business: company.name,
-    paymentDetails: company.documentSettings?.bankDetails,
+    paymentDetails: howToPay(company, doc, due),
   }
   const text = edited ?? renderReminder(settings.templates[tone], vars)
   const subject = `Payment reminder: invoice ${doc.number} from ${company.name}`

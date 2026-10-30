@@ -13,11 +13,13 @@ import { Field, Input, Select, Switch, Textarea } from '../components/ui/form'
 import { Badge, Card, CardHeader, Segmented, Spinner } from '../components/ui/misc'
 import { useToast } from '../components/ui/toast'
 import { db } from '../db'
+import { isPayLink, isUpiId, paymentSettings, payOptions } from '../accounting/paylinks'
 import { DEFAULT_REMINDERS, reminderSettings, STAGE_CHOICES, stageLabel } from '../accounting/reminders'
+import { QrCode } from '../components/QrCode'
 import type { ReminderStage, ReminderTone, TaxComponent, TaxRate } from '../db/types'
 import { cn } from '../lib/cn'
 import { MONTHS, addDays, fiscalYearStart, today } from '../lib/dates'
-import { CURRENCIES } from '../lib/money'
+import { CURRENCIES, currencyDigits } from '../lib/money'
 import { downloadFile, requestPersistentStorage, toCSV, useInstall } from '../lib/platform'
 import { useCompany, useFormat } from '../state/company'
 import { useAccounts } from '../state/data'
@@ -69,6 +71,7 @@ export function Settings() {
         {tab === 'documents' && (
           <>
             <DocumentsTab />
+            <PaymentsSection />
             <RemindersSection />
           </>
         )}
@@ -332,7 +335,89 @@ function DocumentsTab() {
   )
 }
 
-const TONE_LABELS: Record<ReminderTone, string> = { gentle: 'Friendly reminder', firm: 'Firm reminder', final: 'Final reminder' }
+function PaymentsSection() {
+  const company = useCompany()
+  const f = useFormat()
+  const toast = useToast()
+  const current = paymentSettings(company)
+  const [form, setForm] = useState(() => ({ upiId: current.upiId ?? '', upiName: current.upiName ?? '', link: current.link ?? '', showQr: current.showQr ?? true }))
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((s) => ({ ...s, [k]: v }))
+  const rupees = company.currency === 'INR'
+  const upiError = form.upiId.trim() && !isUpiId(form.upiId) ? 'That doesn’t look like a UPI ID. It should be like name@bank.' : undefined
+  const linkError = form.link.trim() && !isPayLink(form.link) ? 'Paste the full link, starting with https://' : undefined
+  const sample = payOptions({ ...company, documentSettings: { ...company.documentSettings, payments: form } }, { type: 'invoice', number: 'INV-0001', status: 'posted' }, 10 ** currencyDigits(company.currency) * 100)
+
+  const save = async () => {
+    if (upiError || linkError) return toast(upiError ?? linkError!, 'error')
+    try {
+      const payments = { upiId: form.upiId.trim() || undefined, upiName: form.upiName.trim() || undefined, link: form.link.trim() || undefined, showQr: form.showQr }
+      await updateCompany(db, company.id, { documentSettings: { ...company.documentSettings, payments } })
+      toast('Online payment settings saved')
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    }
+  }
+
+  return (
+    <Section
+      title="Online payments"
+      description="Let customers pay straight from an invoice. Each invoice gets its own link and QR code with the amount filled in. The money goes directly to you; nothing passes through Ledgerly."
+      footer={
+        <Button variant="primary" onClick={save}>
+          Save changes
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_14rem]">
+        <div className="flex flex-col gap-4">
+          {rupees && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="UPI ID" hint={upiError ? undefined : 'Customers scan the QR with GPay, PhonePe, Paytm or any UPI app.'} error={upiError}>
+                {(id, d) => <Input id={id} aria-describedby={d} value={form.upiId} onChange={(e) => set('upiId', e.target.value)} placeholder="yourshop@okhdfc" autoCapitalize="none" spellCheck={false} />}
+              </Field>
+              <Field label="Name shown to customers" hint="Optional. Usually your business name.">
+                {(id, d) => <Input id={id} aria-describedby={d} value={form.upiName} onChange={(e) => set('upiName', e.target.value)} placeholder={company.name} maxLength={60} />}
+              </Field>
+            </div>
+          )}
+          <Field
+            label="Payment page link"
+            error={linkError}
+            hint={
+              linkError ? undefined : (
+                <>
+                  From Stripe, Razorpay, PayPal, Square or your bank. Add <code>{'{amount}'}</code>, <code>{'{currency}'}</code> or <code>{'{number}'}</code> and they're filled in for each invoice, e.g.{' '}
+                  <code className="break-all">https://paypal.me/yourname/{'{amount}{currency}'}</code>
+                </>
+              )
+            }
+          >
+            {(id, d) => <Input id={id} aria-describedby={d} value={form.link} onChange={(e) => set('link', e.target.value)} placeholder="https://…" inputMode="url" spellCheck={false} />}
+          </Field>
+          <Switch checked={form.showQr} onChange={(v) => set('showQr', v)} label="Show a QR code on invoices" description={rupees ? 'Uses UPI when you have a UPI ID, otherwise the payment link.' : 'Customers can scan it from a printed or PDF invoice.'} />
+          <p className="text-xs text-fg-subtle">When a customer pays, record it with Record payment on the invoice, or match it from your bank statement.</p>
+        </div>
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-line bg-surface-2/50 p-4 text-center">
+          <p className="text-xs font-medium text-fg-subtle">Preview for a {f.money(10 ** currencyDigits(company.currency) * 100)} invoice</p>
+          {sample ? (
+            <>
+              {sample.showQr && <QrCode value={sample.upi?.url ?? sample.link!} size={144} label="Sample payment QR code" className="rounded-md" />}
+              {sample.link && (
+                <a href={sample.link} target="_blank" rel="noopener noreferrer" className="text-xs font-medium break-all text-primary-ink hover:underline">
+                  Try the link
+                </a>
+              )}
+            </>
+          ) : (
+            <p className="py-10 text-sm text-fg-muted">{rupees ? 'Add a UPI ID or link to see it here.' : 'Add a link to see it here.'}</p>
+          )}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+const TONE_LABELS: Record<ReminderTone, string> ={ gentle: 'Friendly reminder', firm: 'Firm reminder', final: 'Final reminder' }
 
 function RemindersSection() {
   const company = useCompany()
