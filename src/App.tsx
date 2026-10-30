@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Fragment } from 'react'
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router'
+import { BrowserRouter, HashRouter, Navigate, Outlet, Route, Routes } from 'react-router'
 import { DOC_TYPES } from './accounting/documents'
 import { AppShell } from './components/layout/AppShell'
 import { QuickEntryProvider } from './components/QuickEntry'
@@ -49,11 +49,14 @@ const docPages = (type: DocType) => [
   <Route key={`${type}-view`} path={`${DOC_TYPES[type].path}/:id`} element={<DocumentView type={type} />} />,
 ]
 
+// Opened as a file (offline/Ledgerly.html) there is no server to answer other paths, so pages live after the #.
+const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
+
 export function App() {
   const companies = useLiveQuery(() => db.companies.toArray(), [])
 
   return (
-    <BrowserRouter>
+    <Router>
       <ToastProvider>
         {companies === undefined ? (
           <div className="grid min-h-dvh place-items-center">
@@ -147,7 +150,7 @@ export function App() {
           </Routes>
         )}
       </ToastProvider>
-    </BrowserRouter>
+    </Router>
   )
 }
 

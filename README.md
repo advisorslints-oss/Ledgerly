@@ -4,7 +4,9 @@ Offline-first, double-entry accounting for any business, on any device. Runs in 
 
 ## Run it
 
-The simplest way: build once, then start the server. It serves the website and the sync service together at http://localhost:8787.
+**Without a server:** `npm run build:offline` makes `offline/Ledgerly.html`, the whole app in one file. Double-click it to open it in your browser; your books are saved in that browser. Copy the file to a USB stick or another computer and it works there too (each browser keeps its own books until you sign in to sync, which needs a server address under **Advanced**).
+
+The simplest way to run it as a website: build once, then start the server. It serves the website and the sync service together at http://localhost:8787.
 
 ```bash
 npm install

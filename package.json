@@ -9,6 +9,7 @@
     "server": "node --watch server/index.ts",
     "start": "node server/index.ts",
     "build": "npm run typecheck && vite build",
+    "build:offline": "vite build --mode file",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p server --noEmit && tsc -p tests --noEmit",
     "test": "vitest run",
