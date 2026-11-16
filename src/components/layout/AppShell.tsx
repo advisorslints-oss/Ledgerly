@@ -47,7 +47,19 @@ import { CommandPalette } from './CommandPalette'
 import { isActive, navItems, SETTINGS_ITEM, type NavItem } from './nav'
 
 export function Logo({ className }: { className?: string }) {
-  return <img src="/logo.svg" alt="" className={cn('size-8 rounded-[9px]', className)} />
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" className={cn('size-8 rounded-[9px]', className)}>
+      <defs>
+        <linearGradient id="ledgerly-logo-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#6366f1" />
+          <stop offset="1" stopColor="#4338ca" />
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="116" fill="url(#ledgerly-logo-g)" />
+      <path d="M164 132v236h184" fill="none" stroke="#fff" strokeWidth="46" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M236 292l46-52 38 30 64-78" fill="none" stroke="#a5f3fc" strokeWidth="34" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
 function NavRow({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {

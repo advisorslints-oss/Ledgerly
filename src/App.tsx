@@ -49,8 +49,13 @@ const docPages = (type: DocType) => [
   <Route key={`${type}-view`} path={`${DOC_TYPES[type].path}/:id`} element={<DocumentView type={type} />} />,
 ]
 
-// Opened as a file (offline/Ledgerly.html) there is no server to answer other paths, so pages live after the #.
-const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
+// Opened as a file or static site (e.g. GitHub Pages) there is no server to answer other paths, so pages live after the #.
+const Router =
+  window.location.protocol === 'file:' ||
+  window.location.hostname.endsWith('github.io') ||
+  window.location.pathname.startsWith('/Ledgerly')
+    ? HashRouter
+    : BrowserRouter
 
 export function App() {
   const companies = useLiveQuery(() => db.companies.toArray(), [])
