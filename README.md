@@ -1,6 +1,9 @@
 # Ledgerly
 
-Offline-first, double-entry accounting for any business, on any device. Runs in the browser, installs as desktop software (Windows, macOS, Linux) or a phone/tablet app, and keeps working with no internet.
+### 🌐 **Live Web App (Use on Any Device):** [https://advisorslints-oss.github.io/Ledgerly/](https://advisorslints-oss.github.io/Ledgerly/)
+
+Offline-first, double-entry accounting for any business, on any device. Runs directly in any modern browser, installs as an app on your phone, tablet, or desktop, and keeps working with no internet connection.
+
 
 ## Run it
 
